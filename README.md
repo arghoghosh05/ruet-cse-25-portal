@@ -1,6 +1,6 @@
 # RUET CSE '25 Portal 🎓
 
-A dedicated web platform designed for the students of the Computer Science & Engineering department (Batch '25) at Rajshahi University of Engineering & Technology (RUET).
+A dedicated web platform designed for the students of the Computer Science & Engineering department (25 series) at Rajshahi University of Engineering & Technology (RUET).
 
 ---
 
