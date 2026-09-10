@@ -13,10 +13,10 @@ A dedicated web platform designed for the students of the Computer Science & Eng
 ---
 
 ## 🛠️ Tech Stack
+- **Framework:** Next.js (App Router)
 - **Language:** TypeScript
-- **Frontend Framework / Library:** React / Next.js *(adjust if vanilla TypeScript)*
-- **Styling:** CSS3 / Tailwind CSS *(adjust based on your setup)*
-- **Deployment:** GitHub Pages / Vercel *(or "In Active Development")*
+- **Styling:** Tailwind CSS
+- **Deployment:** Vercel
 
 ---
 
@@ -27,4 +27,3 @@ Follow these steps to run the project locally:
 1. **Clone the repository:**
    ```bash
    git clone [https://github.com/arghoghosh0712-commits/ruet-cse-25-portal.git](https://github.com/arghoghosh0712-commits/ruet-cse-25-portal.git)
-   
