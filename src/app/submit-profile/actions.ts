@@ -217,11 +217,12 @@ export async function submitStudentProfile(formData: FormData) {
 
 export async function updateOwnStudentProfile(formData: FormData) {
   const supabase = await createClient();
-  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
-  const userId = claimsData?.claims?.sub;
-  if (claimsError || !userId) {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (userError || !user || !user.email_confirmed_at || !user.email) {
     redirect("/submit-profile?error=Your session has expired. Sign in again to edit your profile.");
   }
+  const userId = user.id;
 
   const fullName = getTextField(formData, "full_name");
   const nickname = getTextField(formData, "nickname");
@@ -262,19 +263,72 @@ export async function updateOwnStudentProfile(formData: FormData) {
     redirect("/submit-profile?error=The uploaded image could not be verified.");
   }
 
-  const { error } = await supabase.rpc("update_own_student_profile", {
-    p_full_name: fullName,
-    p_nickname: nickname || null,
-    p_address: address,
-    p_phone_number: phoneNumber,
-    p_whatsapp_number: whatsappNumber,
-    p_blood_group: bloodGroup || null,
-    p_facebook_url: facebookUrl || null,
-    p_image_url: imageUrl,
-  });
+  let adminSupabase: ReturnType<typeof createStudentAuthAdminClient>;
+  try {
+    adminSupabase = createStudentAuthAdminClient();
+  } catch (error) {
+    console.error("Student profile editing is not configured:", error);
+    redirect("/submit-profile?error=Profile editing is temporarily unavailable. Please contact the portal admin.");
+  }
+
+  const { data: account, error: accountError } = await adminSupabase
+    .from("student_accounts")
+    .select("roll, email, status")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (accountError) {
+    console.error("Failed to verify student profile ownership:", accountError.message);
+    redirect("/submit-profile?error=Your account could not be verified. Please try again.");
+  }
+  if (!account || account.status !== "approved") {
+    redirect("/submit-profile?error=An approved student account is required to edit a profile.");
+  }
+
+  const { data: profile, error: profileError } = await adminSupabase
+    .from("profiles")
+    .select("id, created_by, email")
+    .eq("roll", account.roll)
+    .maybeSingle();
+
+  if (profileError) {
+    console.error("Failed to find the student's profile:", profileError.message);
+    redirect("/submit-profile?error=Your profile could not be loaded. Please try again.");
+  }
+  const ownsProfile =
+    profile &&
+    (profile.created_by === userId ||
+      (profile.email ?? "").trim().toLowerCase() === account.email.trim().toLowerCase());
+  if (!profile || !ownsProfile) {
+    redirect("/submit-profile?error=Your account is not linked to this profile. Please contact a portal admin.");
+  }
+
+  const updateData = {
+    full_name: fullName,
+    nickname: nickname || null,
+    address,
+    phone_number: phoneNumber,
+    whatsapp_number: whatsappNumber,
+    blood_group: bloodGroup || null,
+    facebook_url: facebookUrl || null,
+    email: user.email.trim().toLowerCase(),
+    ...(imageUrl ? { image_url: imageUrl } : {}),
+  };
+
+  const { data: updatedProfile, error } = await adminSupabase
+    .from("profiles")
+    .update(updateData)
+    .eq("id", profile.id)
+    .eq("roll", account.roll)
+    .select("id")
+    .maybeSingle();
+
   if (error) {
     console.error("Failed to update own student profile:", error.message);
     redirect("/submit-profile?error=Your profile could not be updated. Please try again.");
+  }
+  if (!updatedProfile) {
+    redirect("/submit-profile?error=No profile was updated. Refresh the page and try again.");
   }
 
   revalidatePublicDirectories();

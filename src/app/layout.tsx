@@ -16,11 +16,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://ruetcse25.vercel.app"),
   title: {
-    default: "RUET CSE ’25 Student Portal",
-    template: "%s | RUET CSE ’25",
+    default: "RUET CSE '25",
+    template: "%s | RUET CSE '25",
   },
   description:
-    "The RUET CSE 25 student portal: find classmates in the student directory, browse sections, and access resources for Rajshahi University of Engineering & Technology Computer Science and Engineering students.",
+    "RUET CSE 25 batch portal. Access class routine, syllabus, student directory, notices, and drive resources for RUET CSE 2025.",
   keywords: [
     "RUET CSE 25",
     "RUET CSE 25 student portal",
@@ -35,17 +35,15 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     url: "https://ruetcse25.vercel.app/",
-    siteName: "RUET CSE ’25 Student Portal",
-    title: "RUET CSE ’25 Student Portal",
-    description:
-      "Find RUET CSE ’25 classmates, browse section directories, and connect with the batch community.",
+    siteName: "RUET CSE '25",
+    title: "RUET CSE '25",
+    description: "RUET CSE 25 batch portal. Access class routine, syllabus, student directory, notices, and drive resources for RUET CSE 2025.",
     images: [{ url: "/ruet-logo.png", alt: "RUET emblem" }],
   },
   twitter: {
     card: "summary",
-    title: "RUET CSE ’25 Student Portal",
-    description:
-      "Find RUET CSE ’25 classmates and browse the student directory.",
+    title: "RUET CSE '25",
+    description: "RUET CSE 25 batch portal. Access class routine, syllabus, student directory, notices, and drive resources for RUET CSE 2025.",
     images: ["/ruet-logo.png"],
   },
   robots: {
@@ -61,6 +59,14 @@ export const metadata: Metadata = {
   },
 };
 
+const websiteStructuredData = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "RUET CSE 25",
+  url: "https://ruetcse25.vercel.app",
+  alternateName: "RUET CSE 2025",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -73,6 +79,10 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full overflow-x-hidden bg-[#DDFBEF] text-[#2F4858]">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteStructuredData) }}
+        />
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
           <div className="ambient-lights" aria-hidden="true">
             <span className="ambient-light ambient-light-one" />

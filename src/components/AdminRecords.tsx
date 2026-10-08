@@ -25,6 +25,7 @@ export default function AdminRecords({ records }: { records: AdminRecord[] }) {
     () => records.filter((record) =>
       record.full_name?.toLocaleLowerCase().includes(normalizedQuery) ||
       record.nickname?.toLocaleLowerCase().includes(normalizedQuery) ||
+      record.email?.toLocaleLowerCase().includes(normalizedQuery) ||
       String(record.roll).includes(normalizedQuery)
     ),
     [normalizedQuery, records],
@@ -48,8 +49,8 @@ export default function AdminRecords({ records }: { records: AdminRecord[] }) {
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Find by name or roll"
-            aria-label="Search student records by name or roll"
+            placeholder="Search records to edit by name, roll, or email"
+            aria-label="Search student records by name, roll number, nickname, or email"
             className="min-h-11 w-full rounded-xl border border-[#2F4858]/12 bg-white pl-10 pr-3 text-sm text-[#2F4858] outline-none transition placeholder:text-[#2F4858]/45 focus:border-[#527A64] focus:ring-4 focus:ring-[#527A64]/10"
           />
         </div>

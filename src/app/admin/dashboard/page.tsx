@@ -8,6 +8,7 @@ import { addStudent, logoutAdmin } from "../actions";
 import StudentProfileForm from "../../../components/StudentProfileForm";
 import ContactNumberFields from "../../../components/ContactNumberFields";
 import AdminRecords from "../../../components/AdminRecords";
+import ApprovedStudentAccounts from "../../../components/ApprovedStudentAccounts";
 import PendingSubmissions from "../../../components/PendingSubmissions";
 import AutoSection from "../../../components/AutoSection";
 import Navbar from "../../../components/ui/Navbar";
@@ -53,6 +54,17 @@ export default async function AdminDashboard({
   if (submissionsError) {
     console.error("Failed to load student submissions:", submissionsError.message);
     throw new Error("Student submissions are temporarily unavailable.");
+  }
+
+  const { data: approvedAccounts, error: approvedAccountsError } = await supabase
+    .from("student_accounts")
+    .select("roll, email, has_profile")
+    .eq("status", "approved")
+    .order("roll", { ascending: true });
+
+  if (approvedAccountsError) {
+    console.error("Failed to load approved student accounts:", approvedAccountsError.message);
+    throw new Error("Approved student accounts are temporarily unavailable.");
   }
 
   return (
@@ -167,8 +179,9 @@ export default async function AdminDashboard({
           </section>
 
           <div className="space-y-6">
-            <PendingSubmissions submissions={submissions ?? []} />
             <AdminRecords records={records ?? []} />
+            <ApprovedStudentAccounts accounts={approvedAccounts ?? []} />
+            <PendingSubmissions submissions={submissions ?? []} />
           </div>
         </div>
       </main>

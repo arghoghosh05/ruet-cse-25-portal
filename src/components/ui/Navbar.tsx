@@ -18,6 +18,7 @@ export default async function Navbar() {
             width={40}
             height={40}
             priority
+            unoptimized
             className="h-10 w-10 object-contain"
           />
           <span className="leading-tight">
