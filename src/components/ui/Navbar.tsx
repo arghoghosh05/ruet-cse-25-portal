@@ -1,33 +1,43 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+import Image from "next/image";
+import { ArrowUpRight, LockKeyhole, UserRound } from "lucide-react";
+import ThemeToggle from "./ThemeToggle";
 
-export default function Navbar() {
+export default async function Navbar() {
+  const isAdminSignedIn =
+    (await headers()).get("x-ruet-admin-authenticated") === "true";
+
   return (
-    <nav className="sticky top-0 z-50 w-full border-b border-white/10 bg-slate-950/50 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-        
-        {/* Left Side: Logo & Brand */}
-        <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-          <img 
-            src="/ruet-logo.png" 
-            alt="RUET Logo" 
-            className="w-10 h-10 object-contain" 
+    <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#2F4858] text-[#DDFBEF] shadow-[0_8px_28px_rgba(27,48,59,0.12)]">
+      <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-5 sm:px-8">
+        <Link href="/" className="group flex items-center gap-3 transition-opacity hover:opacity-85">
+          <Image
+            src="/ruet-logo.png"
+            alt="RUET"
+            width={40}
+            height={40}
+            priority
+            className="h-10 w-10 object-contain"
           />
-          <span className="text-white font-bold text-xl tracking-wide">
-            RUET CSE '25
+          <span className="leading-tight">
+            <span className="block text-[15px] font-semibold tracking-wide sm:text-base">RUET CSE ’25</span>
+            <span className="mt-0.5 block text-[10px] font-medium uppercase tracking-[0.19em] text-[#DDFBEF]/60">Student portal</span>
           </span>
         </Link>
 
-        {/* Right Side: Admin Login Button */}
-        <Link 
-          href="/admin/login" 
-          className="inline-flex items-center justify-center text-sm font-medium text-blue-400 hover:text-blue-300 px-5 py-2.5 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 transition-all shadow-lg shadow-blue-500/5"
-        >
-          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-          </svg>
-          Admin Login
-        </Link>
-        
+        <div className="flex shrink-0 items-center gap-2">
+          <ThemeToggle />
+          <Link
+            href={isAdminSignedIn ? "/admin/dashboard" : "/admin/login"}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#DDFBEF]/20 bg-[#DDFBEF] px-3 text-sm font-semibold text-[#2F4858] shadow-sm transition hover:-translate-y-0.5 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#2F4858] sm:px-5"
+            aria-label={isAdminSignedIn ? "Admin Profile" : "Admin Login"}
+          >
+            {isAdminSignedIn ? <UserRound aria-hidden="true" size={17} /> : <LockKeyhole aria-hidden="true" size={16} />}
+            <span className="hidden sm:inline">{isAdminSignedIn ? "Admin profile" : "Admin login"}</span>
+            <ArrowUpRight aria-hidden="true" className="hidden opacity-55 sm:block" size={15} />
+          </Link>
+        </div>
       </div>
     </nav>
   );

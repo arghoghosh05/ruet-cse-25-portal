@@ -1,65 +1,62 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, X } from "lucide-react";
 
 export default function ToastAlert({ error, success }: { error?: string; success?: string }) {
-  const [isVisible, setIsVisible] = useState(false);
+  const message = error || success || "";
+  const type = error ? "error" : "success";
+  const [isVisible, setIsVisible] = useState(Boolean(message));
   const [isEntering, setIsEntering] = useState(false);
-  const [message, setMessage] = useState("");
-  const [type, setType] = useState<"error" | "success" | "">("");
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const closeToast = useCallback(() => {
+    setIsEntering(false);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setIsVisible(false), 220);
+  }, []);
 
   useEffect(() => {
-    if (error || success) {
-      setMessage(error || success || "");
-      setType(error ? "error" : "success");
+    if (!message) return;
+
+    const showFrame = requestAnimationFrame(() => {
       setIsVisible(true);
-      
-      // Trigger the slide-in animation
-      setTimeout(() => setIsEntering(true), 10);
+      requestAnimationFrame(() => setIsEntering(true));
+    });
+    const hideTimerId = setTimeout(closeToast, 5000);
+    window.history.replaceState(null, "", window.location.pathname);
 
-      // Silently clean the URL so refreshes don't trigger the alert again
-      window.history.replaceState(null, "", window.location.pathname);
+    return () => {
+      cancelAnimationFrame(showFrame);
+      clearTimeout(hideTimerId);
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+    };
+  }, [closeToast, message]);
 
-      // Auto-hide completely after 5 seconds
-      const timer = setTimeout(() => {
-        closeToast();
-      }, 5000);
+  if (!isVisible || !message) return null;
 
-      return () => clearTimeout(timer);
-    }
-  }, [error, success]);
-
-  const closeToast = () => {
-    setIsEntering(false);
-    setTimeout(() => setIsVisible(false), 300); // Wait for the slide-out animation to finish
-  };
-
-  if (!isVisible) return null;
+  const Icon = type === "error" ? AlertCircle : CheckCircle2;
 
   return (
-    <div 
-      className={`fixed top-6 right-6 z-[100] flex items-center gap-4 px-6 py-4 rounded-2xl shadow-2xl backdrop-blur-xl border transition-all duration-300 transform ${
-        isEntering ? "translate-y-0 opacity-100" : "-translate-y-8 opacity-0"
+    <div
+      role={type === "error" ? "alert" : "status"}
+      data-type={type}
+      className={`notification-toast fixed right-4 top-4 z-[100] flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-2xl border px-4 py-3.5 shadow-[0_16px_48px_rgba(23,42,51,0.2)] backdrop-blur-xl transition duration-200 sm:right-6 sm:top-6 sm:max-w-md ${
+        isEntering ? "translate-y-0 opacity-100" : "-translate-y-3 opacity-0"
       } ${
-        type === "error" 
-          ? "bg-red-950/90 border-red-500/50 text-red-400" 
-          : "bg-emerald-950/90 border-emerald-500/50 text-emerald-400"
+        type === "error"
+          ? "border-[#E2B7A9] bg-[#FFF3EF] text-[#733F36]"
+          : "border-[#B8D9C5] bg-[#F0FBF4] text-[#2F5E48]"
       }`}
     >
-      {type === "error" ? (
-        <svg className="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-      ) : (
-        <svg className="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-      )}
-      
-      <p className="font-medium text-sm md:text-base pr-2">{message}</p>
-      
-      <button 
-        onClick={closeToast} 
-        className="shrink-0 p-1.5 rounded-full hover:bg-white/10 transition-colors"
-        aria-label="Close"
+      <Icon aria-hidden="true" className="shrink-0" size={20} />
+      <p className="flex-1 text-sm font-medium leading-5">{message}</p>
+      <button
+        onClick={closeToast}
+        className="notification-close flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition hover:bg-[#2F4858]/[0.07]"
+        aria-label="Close notification"
       >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <X aria-hidden="true" size={16} />
       </button>
     </div>
   );

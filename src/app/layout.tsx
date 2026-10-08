@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "../components/ui/ThemeProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,8 +14,51 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RUET CSE '25 Portal",
-  description: "Official student portal and directory for RUET CSE '25",
+  metadataBase: new URL("https://ruetcse25.vercel.app"),
+  title: {
+    default: "RUET CSE ’25 Student Portal",
+    template: "%s | RUET CSE ’25",
+  },
+  description:
+    "The RUET CSE 25 student portal: find classmates in the student directory, browse sections, and access resources for Rajshahi University of Engineering & Technology Computer Science and Engineering students.",
+  keywords: [
+    "RUET CSE 25",
+    "RUET CSE 25 student portal",
+    "RUET CSE batch 25",
+    "RUET student directory",
+    "Rajshahi University of Engineering and Technology",
+    "RUET classmates",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    url: "https://ruetcse25.vercel.app/",
+    siteName: "RUET CSE ’25 Student Portal",
+    title: "RUET CSE ’25 Student Portal",
+    description:
+      "Find RUET CSE ’25 classmates, browse section directories, and connect with the batch community.",
+    images: [{ url: "/ruet-logo.png", alt: "RUET emblem" }],
+  },
+  twitter: {
+    card: "summary",
+    title: "RUET CSE ’25 Student Portal",
+    description:
+      "Find RUET CSE ’25 classmates and browse the student directory.",
+    images: ["/ruet-logo.png"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+    },
+  },
+  verification: {
+    google: "-g_OY2KBRvnN8qzV2BybPFnaJDznk5MhHDrsEqqMEi0",
+  },
 };
 
 export default function RootLayout({
@@ -23,24 +67,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // Force dark mode on the HTML tag
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col bg-slate-950 text-gray-100 relative overflow-x-hidden">
-        {/* Animated Background Mesh */}
-        <div className="fixed inset-0 w-full h-full z-[-1] overflow-hidden bg-slate-950">
-          <div className="absolute top-0 -left-4 w-72 h-72 bg-blue-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
-          <div className="absolute top-0 -right-4 w-72 h-72 bg-purple-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
-          <div className="absolute -bottom-8 left-20 w-72 h-72 bg-indigo-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
-        </div>
-
-        {/* Main Content */}
-        <div className="relative z-10 flex-grow">
-          {children}
-        </div>
+      <body className="min-h-full overflow-x-hidden bg-[#DDFBEF] text-[#2F4858]">
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+          <div className="ambient-lights" aria-hidden="true">
+            <span className="ambient-light ambient-light-one" />
+            <span className="ambient-light ambient-light-two" />
+            <span className="ambient-light ambient-light-three" />
+          </div>
+          <div className="site-content">{children}</div>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -1,166 +1,173 @@
+import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
+import { ArrowLeft, FilePenLine } from "lucide-react";
 import { createClient } from "../../../../../utils/supabase/server";
 import { redirect } from "next/navigation";
 import Navbar from "../../../../components/ui/Navbar";
 import { updateStudent } from "../../actions";
-import Link from "next/link";
 import AutoSection from "../../../../components/AutoSection";
+import SubmitButton from "../../../../components/SubmitButton";
+import ToastAlert from "../../../../components/ToastAlert";
+import StudentProfileForm from "../../../../components/StudentProfileForm";
+import ContactNumberFields from "../../../../components/ContactNumberFields";
+import { BLOOD_GROUPS } from "../../../../lib/student";
+import { BANGLADESH_DISTRICTS, getCanonicalDistrictName } from "../../../../lib/districts";
+import { isAdminIdentity } from "../../../../lib/admin-auth";
 
-const DISTRICTS = [
-  "Bagerhat", "Bandarban", "Barguna", "Barisal", "Bhola", "Bogra", "Brahmanbaria", 
-  "Chandpur", "Chapai Nawabganj", "Chattogram", "Chuadanga", "Comilla", "Cox's Bazar", 
-  "Dhaka", "Dinajpur", "Faridpur", "Feni", "Gaibandha", "Gazipur", "Gopalganj", 
-  "Habiganj", "Jamalpur", "Jashore", "Jhalokati", "Jhenaidah", "Joypurhat", "Khagrachari", 
-  "Khulna", "Kishoreganj", "Kurigram", "Kushtia", "Lakshmipur", "Lalmonirhat", "Madaripur", 
-  "Magura", "Manikganj", "Meherpur", "Moulvibazar", "Munshiganj", "Mymensingh", "Naogaon", 
-  "Narail", "Narayanganj", "Narsingdi", "Natore", "Netrokona", "Nilphamari", "Noakhali", 
-  "Pabna", "Panchagarh", "Patuakhali", "Pirojpur", "Rajbari", "Rajshahi", "Rangamati", 
-  "Rangpur", "Satkhira", "Shariatpur", "Sherpur", "Sirajganj", "Sunamganj", "Sylhet", 
-  "Tangail", "Thakurgaon"
-];
+export const metadata: Metadata = {
+  title: "Edit student record",
+  robots: { index: false, follow: false },
+};
 
-export default async function EditStudentPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export default async function EditStudentPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string; success?: string }>;
+}) {
+  const [{ id }, { error: actionError, success }] = await Promise.all([params, searchParams]);
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) redirect("/admin/login");
+  const { data, error } = await supabase.auth.getClaims();
+  const claims = data?.claims;
 
-  const { data: student } = await supabase
+  if (error || !claims?.sub || !isAdminIdentity(claims.email, claims.app_metadata)) {
+    redirect("/admin/login?error=Admin access is required.");
+  }
+
+  const { data: student, error: studentError } = await supabase
     .from("profiles")
     .select("*")
-    .match({ id: id, created_by: user.id })
+    .eq("id", id)
     .single();
 
+  if (studentError && studentError.code !== "PGRST116") {
+    console.error("Failed to load student record for editing:", studentError.message);
+    throw new Error("Student record is temporarily unavailable.");
+  }
   if (!student) redirect("/admin/dashboard");
 
   return (
-    <div className="min-h-screen bg-slate-950 text-gray-100 pb-20">
+    <div className="min-h-screen bg-transparent">
+      <ToastAlert error={actionError} success={success} />
       <Navbar />
       <AutoSection />
-      
-      <main className="max-w-2xl mx-auto py-12 px-6">
-        <Link href="/admin/dashboard" className="text-blue-400 mb-6 inline-flex items-center hover:text-blue-300 transition-colors">
-          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-          Back to Dashboard
+
+      <main className="mx-auto max-w-4xl px-5 pb-20 pt-8 sm:px-8 sm:pt-10">
+        <Link href="/admin/dashboard" className="mb-6 inline-flex min-h-10 items-center gap-2 rounded-lg text-sm font-medium text-[#2F4858]/65 transition hover:text-[#2F4858]">
+          <ArrowLeft aria-hidden="true" size={16} /> Back to dashboard
         </Link>
-        
-        <div className="bg-white/5 p-8 rounded-3xl border border-white/10 backdrop-blur-xl">
-          <h2 className="text-2xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
-            Edit Record: {student.full_name}
-          </h2>
-          
-          <form action={updateStudent} className="space-y-4" autoComplete="new-password">
+
+        <section className="overflow-hidden rounded-[1.5rem] bg-[#2F4858] text-[#DDFBEF] shadow-[0_20px_58px_rgba(31,55,66,0.17)]">
+          <header className="border-b border-[#DDFBEF]/10 px-5 py-6 sm:px-8 sm:py-7">
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#DDFBEF]/15 bg-white/5">
+                <FilePenLine aria-hidden="true" size={20} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.19em] text-[#DDFBEF]/55">Student record</p>
+                <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight sm:text-3xl">Edit profile</h1>
+                <p className="mt-2 text-sm text-[#DDFBEF]/65">{student.full_name} <span className="px-1.5">·</span> Roll {student.roll}</p>
+              </div>
+            </div>
+          </header>
+
+          <StudentProfileForm action={updateStudent} className="space-y-7 p-5 sm:p-8">
             <input type="hidden" name="id" value={student.id} />
-            
-            <div className="space-y-2">
-              <label className="text-sm text-slate-300">Full Name</label>
-              <input 
-                name="full_name" 
-                type="text" 
-                defaultValue={student.full_name} 
-                required 
-                autoComplete="new-password"
-                className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white focus:ring-2 focus:ring-blue-500" 
-              />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm text-slate-300">Roll Number</label>
-                <input 
-                  name="roll" 
-                  type="number" 
-                  defaultValue={student.roll} 
-                  required 
-                  autoComplete="new-password"
-                  className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white focus:ring-2 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <label className="text-sm text-slate-300">Section (Auto-Assigned)</label>
-                <input 
-                  name="section" 
-                  type="text" 
-                  readOnly 
-                  defaultValue={student.section}
-                  autoComplete="new-password"
-                  className="w-full px-4 py-3 rounded-xl bg-slate-900/60 border border-white/5 text-blue-400 uppercase font-bold cursor-not-allowed focus:outline-none" 
-                />
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm text-slate-300">District (Location)</label>
-                <select name="address" defaultValue={student.address || ""} required autoComplete="new-password" className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white focus:ring-2 focus:ring-blue-500">
-                  <option value="" disabled>Select a District</option>
-                  {DISTRICTS.map((district) => (
-                    <option key={district} value={district}>{district}</option>
-                  ))}
-                </select>
+            <section>
+              <h2 className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-[#DDFBEF]/65">Student details</h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="portal-label" htmlFor="full-name">Full name <span className="text-[#B9DBC8]">*</span></label>
+                  <input id="full-name" name="full_name" type="text" defaultValue={student.full_name || ""} maxLength={120} required className="portal-field" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="portal-label" htmlFor="nickname">Nickname <span className="font-normal text-[#DDFBEF]/50">(optional)</span></label>
+                  <input id="nickname" name="nickname" type="text" defaultValue={student.nickname || ""} maxLength={40} placeholder="Enter nickname" className="portal-field" />
+                </div>
+                <div>
+                  <label className="portal-label" htmlFor="roll">Roll number <span className="text-[#B9DBC8]">*</span></label>
+                  <input id="roll" name="roll" type="text" inputMode="numeric" pattern="[0-9]{7}" maxLength={7} defaultValue={String(student.roll)} required className="portal-field" />
+                </div>
+                <div>
+                  <label className="portal-label" htmlFor="section">Section</label>
+                  <input id="section" name="section" type="text" defaultValue={student.section} readOnly className="portal-field cursor-not-allowed border-white/10 bg-white/10 font-semibold uppercase text-[#DDFBEF]/80" />
+                  <p className="mt-1.5 text-[11px] text-[#DDFBEF]/50">Assigned automatically from the roll number.</p>
+                </div>
+                <div>
+                  <label className="portal-label" htmlFor="email">Email</label>
+                  <input id="email" name="email" type="email" defaultValue={student.email || ""} maxLength={254} className="portal-field" />
+                </div>
+                <div>
+                  <label className="portal-label" htmlFor="blood-group">Blood group</label>
+                  <select id="blood-group" name="blood_group" defaultValue={student.blood_group || ""} className="portal-field">
+                    <option value="">Select group</option>
+                    {BLOOD_GROUPS.map((group) => <option key={group} value={group}>{group}</option>)}
+                  </select>
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm text-slate-300">Primary Phone</label>
-                <input 
-                  name="phone_number" 
-                  type="text" 
-                  defaultValue={student.phone_number || ""} 
-                  autoComplete="new-password"
-                  className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white focus:ring-2 focus:ring-blue-500" 
-                />
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-               <label className="text-sm text-green-400">WhatsApp Number</label>
-               <input 
-                 name="whatsapp_number" 
-                 type="text" 
-                 defaultValue={student.whatsapp_number || ""} 
-                 autoComplete="new-password"
-                 className="w-full px-4 py-3 rounded-xl bg-black/50 border border-green-500/30 text-white focus:ring-2 focus:ring-green-500" 
-               />
-            </div>
+            </section>
 
-            {/* 🔥 NEW: Image Preview System */}
-            <div className="space-y-2 pt-2">
-              <label className="text-sm text-slate-300">Profile Image</label>
-              
+            <section className="border-t border-[#DDFBEF]/10 pt-6">
+              <h2 className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-[#DDFBEF]/65">Contact & location</h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="portal-label" htmlFor="district">District <span className="text-[#B9DBC8]">*</span></label>
+                  <select id="district" name="address" defaultValue={getCanonicalDistrictName(student.address || "")} required className="portal-field">
+                    <option value="" disabled>Select district</option>
+                    {BANGLADESH_DISTRICTS.map((district) => <option key={district} value={district}>{district}</option>)}
+                  </select>
+                </div>
+                <div className="sm:col-span-2 space-y-3">
+                  <ContactNumberFields
+                    phoneNumber={student.phone_number || ""}
+                    whatsappNumber={student.whatsapp_number || ""}
+                  />
+                </div>
+                <div>
+                  <label className="portal-label" htmlFor="facebook-url">Facebook profile</label>
+                  <input id="facebook-url" name="facebook_url" type="url" defaultValue={student.facebook_url || ""} maxLength={500} placeholder="https://facebook.com/…" className="portal-field" />
+                </div>
+              </div>
+            </section>
+
+            <section className="border-t border-[#DDFBEF]/10 pt-6">
+              <h2 className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-[#DDFBEF]/65">Profile photo</h2>
               {student.image_url && (
-                <div className="mb-3 flex items-center gap-4 p-3 bg-black/30 rounded-xl border border-white/5">
-                  <img src={student.image_url} alt="Current profile" className="w-16 h-16 rounded-xl object-cover border border-white/10 shadow-inner" />
+                <div className="mb-4 flex items-center gap-4 rounded-xl border border-[#DDFBEF]/10 bg-white/5 p-3">
+                  <Image
+                    src={student.image_url}
+                    alt={`Current profile photo for ${student.full_name || "student"}`}
+                    width={64}
+                    height={64}
+                    unoptimized
+                    className="h-16 w-16 rounded-xl object-cover"
+                  />
                   <div>
-                    <p className="text-sm font-medium text-slate-300">Current Image</p>
-                    <p className="text-xs text-slate-500">Leave this input blank to keep the current image.</p>
+                    <p className="text-sm font-medium">Current photo</p>
+                    <p className="mt-1 text-xs text-[#DDFBEF]/55">Choose a new file to replace it.</p>
                   </div>
                 </div>
               )}
+              <label htmlFor="profile-image" className="portal-label">Upload a new image <span className="font-normal text-[#DDFBEF]/50">(optional · max 15 MB)</span></label>
+              <input id="profile-image" name="image" type="file" accept="image/png, image/jpeg, image/webp" className="portal-field file:mr-3 file:rounded-lg file:border-0 file:bg-[#2F4858] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-[#DDFBEF]" />
+            </section>
 
-              <input 
-                name="image" 
-                type="file" 
-                accept="image/png, image/jpeg, image/jpg, image/webp" 
-                className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-500/20 file:text-blue-400 hover:file:bg-blue-500/30 cursor-pointer" 
-              />
+            <div className="flex flex-col-reverse gap-3 border-t border-[#DDFBEF]/10 pt-6 sm:flex-row sm:justify-end">
+              <Link href="/admin/dashboard" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-[#DDFBEF]/20 px-5 text-sm font-semibold text-[#DDFBEF]/80 transition hover:bg-white/5 hover:text-white">
+                Cancel
+              </Link>
+              <SubmitButton
+                pendingText="Saving changes…"
+                className="flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#DDFBEF] px-6 text-sm font-semibold text-[#2F4858] shadow-sm transition hover:-translate-y-0.5 hover:bg-white disabled:cursor-wait disabled:opacity-70"
+              >
+                <FilePenLine aria-hidden="true" size={17} /> Save changes
+              </SubmitButton>
             </div>
-
-            <div className="space-y-2">
-              <label className="text-sm text-slate-300">Facebook URL</label>
-              <input 
-                name="facebook_url" 
-                type="url" 
-                defaultValue={student.facebook_url || ""} 
-                autoComplete="new-password"
-                className="w-full px-4 py-3 rounded-xl bg-black/50 border border-white/10 text-white focus:ring-2 focus:ring-blue-500" 
-              />
-            </div>
-            
-            <button type="submit" className="w-full mt-4 bg-blue-600/80 hover:bg-blue-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-blue-500/20">
-              Save Changes
-            </button>
-          </form>
-        </div>
+          </StudentProfileForm>
+        </section>
       </main>
     </div>
   );
