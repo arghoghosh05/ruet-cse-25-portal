@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useActionState } from "react";
 import { createClient } from "../../utils/supabase/client";
 import {
+  compressProfileImage,
   hasValidImageSignature,
   maxProfileImageSize,
   profileImageExtensions,
@@ -48,10 +49,16 @@ export default function StudentProfileForm({
           return { error: "Your session has expired. Sign in again and retry." };
         }
 
-        const imagePath = `${data.user.id}/${crypto.randomUUID()}.${extension}`;
+        const uploadFile = await compressProfileImage(imageFile);
+        const uploadExtension = profileImageExtensions[uploadFile.type];
+        if (!uploadExtension) {
+          return { error: "The selected image could not be prepared for upload. Please try another photo." };
+        }
+
+        const imagePath = `${data.user.id}/${crypto.randomUUID()}.${uploadExtension}`;
         const { error: uploadError } = await supabase.storage
           .from("avatars")
-          .upload(imagePath, imageFile, { contentType: imageFile.type, upsert: false });
+          .upload(imagePath, uploadFile, { contentType: uploadFile.type, upsert: false });
         if (uploadError) {
           console.error("Student image upload failed:", uploadError.message);
           return { error: "The image could not be uploaded. Please try again." };

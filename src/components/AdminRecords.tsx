@@ -68,7 +68,7 @@ export default function AdminRecords({ records }: { records: AdminRecord[] }) {
               <div className="flex min-w-0 flex-1 items-center gap-3.5">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#DDFBEF] text-lg font-semibold text-[#2F4858]">
                   {record.image_url ? (
-                    <Image src={record.image_url} alt="" width={48} height={48} unoptimized className="h-full w-full object-cover" />
+                    <Image src={record.image_url} alt="" width={48} height={48} sizes="48px" className="h-full w-full object-cover" />
                   ) : (
                     record.full_name?.trim().charAt(0).toLocaleUpperCase() || "?"
                   )}

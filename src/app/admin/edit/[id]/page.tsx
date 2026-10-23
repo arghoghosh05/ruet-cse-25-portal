@@ -142,7 +142,7 @@ export default async function EditStudentPage({
                     alt={`Current profile photo for ${student.full_name || "student"}`}
                     width={64}
                     height={64}
-                    unoptimized
+                    sizes="64px"
                     className="h-16 w-16 rounded-xl object-cover"
                   />
                   <div>

@@ -85,7 +85,7 @@ export default function StudentOwnProfileForm({ profile }: { profile: OwnProfile
         <div>
           {profile.image_url && (
             <div className="mb-3 flex items-center gap-3">
-              <Image src={profile.image_url} alt="Your current profile photo" width={64} height={64} unoptimized className="h-16 w-16 rounded-xl object-cover" />
+              <Image src={profile.image_url} alt="Your current profile photo" width={64} height={64} sizes="64px" className="h-16 w-16 rounded-xl object-cover" />
               <p className="text-xs text-[#2F4858]/60">Choose a file below to replace your photo.</p>
             </div>
           )}
