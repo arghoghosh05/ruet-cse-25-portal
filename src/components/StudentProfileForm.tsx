@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import { auth, storage } from "@/lib/firebase";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import {
+  compressProfileImage,
   hasValidImageSignature,
   maxProfileImageSize,
   profileImageExtensions,
@@ -12,61 +13,6 @@ import {
 
 type FormState = { error: string | null };
 type StudentAction = (formData: FormData) => Promise<void>;
-
-/**
- * Compresses an image file on the client using HTML5 canvas before uploading.
- * Reduces raw multi-megabyte camera photos to a compact WebP (~80-120 KB),
- * preventing storage ballooning and keeping Spark Plan egress well within limits.
- */
-async function compressImage(
-  file: File,
-  maxWidth = 800,
-  maxHeight = 800,
-  quality = 0.8
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width > maxWidth || height > maxHeight) {
-        if (width / height > maxWidth / maxHeight) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
-        } else {
-          width = Math.round((width * maxHeight) / height);
-          height = maxHeight;
-        }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        reject(new Error("Your browser could not process this image."));
-        return;
-      }
-      ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob(
-        (blob) => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            reject(new Error("Your browser could not encode this image."));
-          }
-        },
-        "image/webp",
-        quality
-      );
-    };
-    img.onerror = (err) => {
-      URL.revokeObjectURL(url);
-      reject(err);
-    };
-    img.src = url;
-  });
-}
 
 export default function StudentProfileForm({
   action,
@@ -103,14 +49,15 @@ export default function StudentProfileForm({
           if (!currentUser || !storage) {
             return { error: "Sign in with Google before uploading a profile photo." };
           }
-          const compressedBlob = await compressImage(imageFile, 800, 800, 0.8);
-          if (compressedBlob.type !== "image/webp" || compressedBlob.size > 1_500_000) {
+          const uploadFile = await compressProfileImage(imageFile);
+          const uploadExtension = profileImageExtensions[uploadFile.type];
+          if (!uploadExtension || uploadFile.size > 1_500_000) {
             return { error: "The compressed photo is too large. Choose a smaller image." };
           }
-          const imagePath = `avatars/${currentUser.uid}/${crypto.randomUUID()}.webp`;
+          const imagePath = `avatars/${currentUser.uid}/${crypto.randomUUID()}.${uploadExtension}`;
           const storageRef = ref(storage, imagePath);
-          await uploadBytes(storageRef, compressedBlob, {
-            contentType: "image/webp",
+          await uploadBytes(storageRef, uploadFile, {
+            contentType: uploadFile.type,
           });
           const downloadUrl = await getDownloadURL(storageRef);
           formData.set("image_path", downloadUrl);

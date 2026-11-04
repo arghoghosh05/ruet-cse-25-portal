@@ -123,6 +123,7 @@ export default function StudentDirectory({ profiles }: { profiles: StudentProfil
                         alt={profile.full_name ? `${profile.full_name} profile photo` : "Student profile"}
                         width={136}
                         height={136}
+                        sizes="68px"
                         className="h-full w-full object-cover"
                       />
                     </button>
@@ -225,8 +226,9 @@ export default function StudentDirectory({ profiles }: { profiles: StudentProfil
             <Image
               src={expandedImage.src}
               alt={expandedImage.alt}
-              width={1600}
-              height={1600}
+              width={1200}
+              height={1200}
+              sizes="92vw"
               className="max-h-[85vh] max-w-[92vw] rounded-2xl object-contain"
             />
           </div>

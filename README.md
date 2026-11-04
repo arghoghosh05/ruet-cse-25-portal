@@ -33,6 +33,14 @@ uploaded to the signed-in student's `avatars/{uid}/` Storage path and are
 validated again by the server before use. Admin review and student enrollment
 are server-authorized.
 
+Avatar pruning is a separate, explicit maintenance task. With Firebase Admin
+credentials and the project ID and Storage bucket configured in the shell, run
+`npm run prune:avatars` to list objects that are not referenced by any profile
+or pending submission. Review the dry-run output before using
+`npm run prune:avatars -- --delete`; only files matching the generated
+`avatars/{uid}/{uuid}.{jpg|jpeg|png|webp}` naming scheme are eligible, and
+unrecognized objects stop the operation.
+
 Google sign-in is a new enrollment flow. Existing passwords and Supabase Auth
 accounts are not transferred. Existing directory records can be imported and
 then linked to a student's newly verified Google account by matching the

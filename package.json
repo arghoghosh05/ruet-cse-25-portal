@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "prune:avatars": "node scripts/prune-avatars.mjs",
     "import:supabase-export": "node scripts/import-supabase-export.mjs"
   },
   "overrides": {
@@ -30,7 +31,6 @@
     "@types/node": "^20.19.43",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "autoprefixer": "^10.5.5",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "postcss": "^8.5.28",
