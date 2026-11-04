@@ -1,0 +1,29 @@
+{
+  "name": "ruet-cse-25-hub",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.7"
+  },
+  "dependencies": {
+    "firebase": "^11.0.0",
+    "lucide-react": "^1.41.0",
+    "next": "16.4.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "typescript": "^5",
+    "typescript-eslint": "^8.71.1"
+  }
+}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "../components/ui/ThemeProvider";
+import { FirebaseAuthProvider } from "../components/FirebaseAuthProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -84,12 +85,14 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteStructuredData) }}
         />
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
-          <div className="ambient-lights" aria-hidden="true">
-            <span className="ambient-light ambient-light-one" />
-            <span className="ambient-light ambient-light-two" />
-            <span className="ambient-light ambient-light-three" />
-          </div>
-          <div className="site-content">{children}</div>
+          <FirebaseAuthProvider>
+            <div className="ambient-lights" aria-hidden="true">
+              <span className="ambient-light ambient-light-one" />
+              <span className="ambient-light ambient-light-two" />
+              <span className="ambient-light ambient-light-three" />
+            </div>
+            <div className="site-content">{children}</div>
+          </FirebaseAuthProvider>
         </ThemeProvider>
       </body>
     </html>

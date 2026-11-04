@@ -1,11 +1,12 @@
 import Image from "next/image";
-import { FilePenLine, LogOut } from "lucide-react";
-import { logoutStudent, updateOwnStudentProfile } from "../app/submit-profile/actions";
+import { FilePenLine } from "lucide-react";
+import { updateOwnStudentProfile } from "../app/admin/actions";
 import { BANGLADESH_DISTRICTS } from "../lib/districts";
 import { BLOOD_GROUPS } from "../lib/student";
 import ContactNumberFields from "./ContactNumberFields";
 import StudentProfileForm from "./StudentProfileForm";
 import SubmitButton from "./SubmitButton";
+import FirebaseSignOutButton from "./FirebaseSignOutButton";
 
 type OwnProfile = {
   full_name: string;
@@ -85,7 +86,7 @@ export default function StudentOwnProfileForm({ profile }: { profile: OwnProfile
         <div>
           {profile.image_url && (
             <div className="mb-3 flex items-center gap-3">
-              <Image src={profile.image_url} alt="Your current profile photo" width={64} height={64} unoptimized className="h-16 w-16 rounded-xl object-cover" />
+              <Image src={profile.image_url} alt="Your current profile photo" width={64} height={64} className="h-16 w-16 rounded-xl object-cover" />
               <p className="text-xs text-[#2F4858]/60">Choose a file below to replace your photo.</p>
             </div>
           )}
@@ -101,14 +102,9 @@ export default function StudentOwnProfileForm({ profile }: { profile: OwnProfile
         </SubmitButton>
       </StudentProfileForm>
 
-      <form action={logoutStudent} className="mt-4 border-t border-[#2F4858]/10 pt-4">
-        <SubmitButton
-          pendingText="Signing out…"
-          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#2F4858]/15 px-5 text-sm font-semibold text-[#2F4858] transition hover:bg-[#DDFBEF]/60 disabled:cursor-wait disabled:opacity-70"
-        >
-          <LogOut aria-hidden="true" size={16} /> Sign out
-        </SubmitButton>
-      </form>
+      <div className="mt-4 border-t border-[#2F4858]/10 pt-4">
+        <FirebaseSignOutButton className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#2F4858]/15 px-5 text-sm font-semibold text-[#2F4858] transition hover:bg-[#DDFBEF]/60 disabled:cursor-wait disabled:opacity-70" />
+      </div>
     </div>
   );
 }

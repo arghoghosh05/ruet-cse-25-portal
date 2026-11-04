@@ -5,19 +5,6 @@ const adminEmails = new Set(
     .filter(Boolean),
 );
 
-export function isAdminIdentity(
-  email: string | undefined,
-  appMetadata: object | null | undefined,
-) {
-  const hasAdminRole =
-    appMetadata !== null &&
-    typeof appMetadata === "object" &&
-    "role" in appMetadata &&
-    appMetadata.role === "admin";
-
-  return Boolean(
-    email &&
-      adminEmails.has(email.trim().toLowerCase()) &&
-      hasAdminRole,
-  );
+export function isAdminEmail(email: string | undefined) {
+  return Boolean(email && adminEmails.has(email.trim().toLowerCase()));
 }

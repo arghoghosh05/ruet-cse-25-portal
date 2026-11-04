@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, FilePenLine } from "lucide-react";
-import { createClient } from "../../../../../utils/supabase/server";
 import { redirect } from "next/navigation";
 import Navbar from "../../../../components/ui/Navbar";
 import { updateStudent } from "../../actions";
@@ -13,7 +12,9 @@ import StudentProfileForm from "../../../../components/StudentProfileForm";
 import ContactNumberFields from "../../../../components/ContactNumberFields";
 import { BLOOD_GROUPS } from "../../../../lib/student";
 import { BANGLADESH_DISTRICTS, getCanonicalDistrictName } from "../../../../lib/districts";
-import { isAdminIdentity } from "../../../../lib/admin-auth";
+import { getFirebaseUser } from "../../../../lib/firebase-session";
+import { isAdminEmail } from "../../../../lib/admin-auth";
+import { getFirebaseAdmin } from "../../../../../lib/firebase-admin";
 
 export const metadata: Metadata = {
   title: "Edit student record",
@@ -28,25 +29,29 @@ export default async function EditStudentPage({
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   const [{ id }, { error: actionError, success }] = await Promise.all([params, searchParams]);
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
-  const claims = data?.claims;
-
-  if (error || !claims?.sub || !isAdminIdentity(claims.email, claims.app_metadata)) {
+  const user = await getFirebaseUser();
+  if (!user?.email || !isAdminEmail(user.email)) {
     redirect("/admin/login?error=Admin access is required.");
   }
 
-  const { data: student, error: studentError } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (studentError && studentError.code !== "PGRST116") {
-    console.error("Failed to load student record for editing:", studentError.message);
-    throw new Error("Student record is temporarily unavailable.");
-  }
-  if (!student) redirect("/admin/dashboard");
+  const { db } = getFirebaseAdmin();
+  const snap = await db.collection("profiles").doc(id).get();
+  if (!snap.exists) redirect("/admin/dashboard");
+  const data = snap.data()!;
+  const student = {
+    id: snap.id,
+    full_name: typeof data.full_name === "string" ? data.full_name : "",
+    nickname: typeof data.nickname === "string" ? data.nickname : "",
+    roll: typeof data.roll === "number" || typeof data.roll === "string" ? data.roll : "",
+    section: typeof data.section === "string" ? data.section : "",
+    email: typeof data.email === "string" ? data.email : "",
+    blood_group: typeof data.blood_group === "string" ? data.blood_group : "",
+    address: typeof data.address === "string" ? data.address : "",
+    phone_number: typeof data.phone_number === "string" ? data.phone_number : "",
+    whatsapp_number: typeof data.whatsapp_number === "string" ? data.whatsapp_number : "",
+    facebook_url: typeof data.facebook_url === "string" ? data.facebook_url : "",
+    image_url: typeof data.image_url === "string" ? data.image_url : null,
+  };
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -142,7 +147,6 @@ export default async function EditStudentPage({
                     alt={`Current profile photo for ${student.full_name || "student"}`}
                     width={64}
                     height={64}
-                    unoptimized
                     className="h-16 w-16 rounded-xl object-cover"
                   />
                   <div>

@@ -3,9 +3,11 @@ import Image from "next/image";
 import { ArrowLeft, LockKeyhole, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import Navbar from "../../../components/ui/Navbar";
-import SubmitButton from "../../../components/SubmitButton";
+import StudentEmailAccess from "../../../components/StudentEmailAccess";
 import ToastAlert from "../../../components/ToastAlert";
-import { loginAdmin } from "../actions";
+import { getFirebaseUser } from "../../../lib/firebase-session";
+import { isAdminEmail } from "../../../lib/admin-auth";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
   title: "Admin sign in",
@@ -18,6 +20,8 @@ export default async function AdminLogin({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
+  const user = await getFirebaseUser();
+  if (isAdminEmail(user?.email)) redirect("/admin/dashboard");
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -68,38 +72,11 @@ export default async function AdminLogin({
               <p className="mt-2 text-sm leading-6 text-[#2F4858]/65">Use your authorized portal administrator account.</p>
             </div>
 
-            <form action={loginAdmin} className="space-y-5">
-              <div>
-                <label htmlFor="admin-email" className="mb-2 block text-sm font-medium text-[#2F4858]">Email address</label>
-                <input
-                  id="admin-email"
-                  name="email"
-                  type="email"
-                  required
-                  autoComplete="username"
-                  placeholder="you@example.com"
-                  className="portal-field"
-                />
-              </div>
-              <div>
-                <label htmlFor="admin-password" className="mb-2 block text-sm font-medium text-[#2F4858]">Password</label>
-                <input
-                  id="admin-password"
-                  name="password"
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  placeholder="Enter your password"
-                  className="portal-field"
-                />
-              </div>
-              <SubmitButton
-                pendingText="Signing in…"
-                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2F4858] px-5 text-sm font-semibold text-[#DDFBEF] shadow-md shadow-[#2F4858]/15 transition hover:-translate-y-0.5 hover:bg-[#243B49] disabled:cursor-wait disabled:opacity-75"
-              >
-                Sign in securely
-              </SubmitButton>
-            </form>
+            <StudentEmailAccess
+              title="Sign in with an administrator Google account"
+              description="Use a verified Google account listed in the server-only ADMIN_EMAILS setting."
+              signedInDescription={`Signed in as ${user?.email ?? "a Google account"}. This address is not on the administrator allowlist.`}
+            />
 
             <p className="mt-6 border-t border-[#2F4858]/[0.08] pt-5 text-center text-xs leading-5 text-[#2F4858]/55">
               Access is limited to administrators approved for the RUET CSE ’25 portal.
