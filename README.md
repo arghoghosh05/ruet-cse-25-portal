@@ -105,9 +105,8 @@ interactions only, and restricts uploads to the configured Telegram user IDs.
 
 ## Local development
 
-Use Node.js 22.12 or newer within the 22.x release line. Firebase Admin's
-JWKS dependency requires the Node.js ESM interoperability available in that
-runtime range.
+Use Node.js 22.12 or newer. Firebase Admin's JWKS dependency requires the
+Node.js ESM interoperability available in supported runtime versions.
 
 ```sh
 npm install
