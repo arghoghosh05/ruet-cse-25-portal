@@ -1,124 +1,129 @@
 #!/usr/bin/env node
-/**
- * Prune orphaned files from the Supabase `avatars` bucket.
- *
- * Every avatar upload writes a fresh `<user_id>/<uuid>.<ext>` object and nothing
- * in the app ever deletes one, so replaced photos, rejected submissions and
- * abandoned forms accumulate forever. This lists the objects no row points at
- * any more, and deletes them on request.
- *
- *   SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/prune-avatars.mjs
- *   … add --delete to actually remove what the dry run lists
- *
- * Safe by construction:
- *   - dry run unless --delete is passed
- *   - only ever targets paths shaped like <uuid>/<uuid>.<ext>
- *   - skips any path referenced by profiles or student_submissions
- *   - aborts without deleting if a stored path doesn't fit that shape
- *
- * The service role key bypasses row level security. It is read from the
- * environment only and never written anywhere.
- */
 
-const BUCKET = "avatars";
-const BATCH_SIZE = 100;
-const PATH_PATTERN = /^[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i;
+import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
+import { FieldPath, getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 
-const SUPABASE_URL = process.env.SUPABASE_URL?.replace(/\/+$/, "");
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const PAGE_SIZE = 500;
+const DELETE_BATCH_SIZE = 100;
+const AVATAR_PREFIX = "avatars/";
+const PATH_PATTERN =
+  /^avatars\/[^/]{1,128}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(jpg|jpeg|png|webp)$/i;
 const DELETE = process.argv.includes("--delete");
 
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-  console.error(
-    "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Run it with both set in the environment.",
-  );
-  process.exit(1);
-}
-
-const headers = {
-  apikey: SERVICE_ROLE_KEY,
-  Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-};
-
-async function request(path, options = {}) {
-  const response = await fetch(`${SUPABASE_URL}${path}`, {
-    ...options,
-    headers: { ...headers, "Content-Type": "application/json", ...(options.headers ?? {}) },
-  });
-
-  if (response.status === 402) {
-    const body = await response.text();
-    throw new Error(`Supabase rejected the request (402): ${body}`);
+function getServiceAccount() {
+  const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (json) {
+    const account = JSON.parse(json);
+    if (!account.project_id || !account.client_email || !account.private_key) {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is missing required fields.");
+    }
+    return {
+      projectId: account.project_id,
+      clientEmail: account.client_email,
+      privateKey: account.private_key.replace(/\\n/g, "\n"),
+    };
   }
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`${path} -> ${response.status} ${response.statusText}: ${body}`);
+  const { FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
+  if (FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
+    return {
+      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+      clientEmail: FIREBASE_CLIENT_EMAIL,
+      privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    };
   }
-
-  return response.json();
+  return null;
 }
 
-async function fetchReferencedPaths(table) {
+function initializeFirebase() {
+  const existing = getApps().find((app) => app.name === "avatar-pruner");
+  if (existing) return existing;
+
+  const account = getServiceAccount();
+  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || account?.projectId;
+  if (!projectId) {
+    throw new Error("Set NEXT_PUBLIC_FIREBASE_PROJECT_ID or provide a service account.");
+  }
+  if (account?.projectId && account.projectId !== projectId) {
+    throw new Error("The service account project does not match NEXT_PUBLIC_FIREBASE_PROJECT_ID.");
+  }
+
+  const options = account
+    ? { credential: cert(account), projectId }
+    : process.env.GOOGLE_APPLICATION_CREDENTIALS
+      ? { credential: applicationDefault(), projectId }
+      : null;
+  if (!options) {
+    throw new Error(
+      "Set FIREBASE_SERVICE_ACCOUNT_JSON, FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY, or GOOGLE_APPLICATION_CREDENTIALS.",
+    );
+  }
+
+  return initializeApp(options, "avatar-pruner");
+}
+
+function getObjectPath(imageUrl, bucketName) {
+  if (typeof imageUrl !== "string") return null;
+  try {
+    const url = new URL(imageUrl);
+    if (url.protocol !== "https:" || url.hostname !== "firebasestorage.googleapis.com") {
+      return null;
+    }
+    const match = url.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/);
+    if (!match || decodeURIComponent(match[1]) !== bucketName) return null;
+    const objectPath = decodeURIComponent(match[2]);
+    return objectPath.startsWith(AVATAR_PREFIX) ? objectPath : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchReferencedPaths(db, bucketName, collectionName) {
   const paths = new Set();
-  let offset = 0;
+  let query = db
+    .collection(collectionName)
+    .select("image_url")
+    .orderBy(FieldPath.documentId())
+    .limit(PAGE_SIZE);
 
   for (;;) {
-    const rows = await request(
-      `/rest/v1/${table}?select=image_url&image_url=not.is.null&limit=1000&offset=${offset}`,
-    );
-    if (!Array.isArray(rows) || rows.length === 0) break;
-
-    for (const row of rows) {
-      if (typeof row.image_url === "string") {
-        const marker = `/${BUCKET}/`;
-        const index = row.image_url.indexOf(marker);
-        if (index !== -1) {
-          paths.add(decodeURIComponent(row.image_url.slice(index + marker.length)));
-        }
-      }
+    const snapshot = await query.get();
+    for (const document of snapshot.docs) {
+      const path = getObjectPath(document.get("image_url"), bucketName);
+      if (path) paths.add(path);
     }
-
-    offset += rows.length;
-    if (rows.length < 1000) break;
+    if (snapshot.size < PAGE_SIZE) break;
+    query = query.startAfter(snapshot.docs[snapshot.docs.length - 1]);
   }
 
   return paths;
 }
 
-async function listFolder(prefix) {
+async function listAvatarFiles(bucket) {
   const objects = [];
-  let offset = 0;
+  let options = {
+    prefix: AVATAR_PREFIX,
+    autoPaginate: false,
+    maxResults: PAGE_SIZE,
+  };
 
   for (;;) {
-    const page = await request(`/storage/v1/object/list/${BUCKET}`, {
-      method: "POST",
-      body: JSON.stringify({
-        prefix,
-        limit: 100,
-        offset,
-        sortBy: { column: "created_at", order: "asc" },
+    const [files, nextQuery] = await bucket.getFiles(options);
+    const page = await Promise.all(
+      files.map(async (file) => {
+        const [metadata] = await file.getMetadata();
+        return {
+          file,
+          name: file.name,
+          size: Number(metadata.size) || 0,
+          created: metadata.timeCreated,
+        };
       }),
-    });
-
-    if (!Array.isArray(page) || page.length === 0) break;
-
-    for (const entry of page) {
-      // Folders carry no metadata; files do.
-      if (entry.metadata && typeof entry.metadata.size === "number") {
-        objects.push({
-          name: prefix ? `${prefix}/${entry.name}` : entry.name,
-          size: entry.metadata.size,
-          created_at: entry.created_at,
-        });
-      } else {
-        const child = await listFolder(prefix ? `${prefix}/${entry.name}` : entry.name);
-        objects.push(...child);
-      }
-    }
-
-    offset += page.length;
-    if (page.length < 100) break;
+    );
+    objects.push(...page);
+    if (!nextQuery) break;
+    options = nextQuery;
   }
 
   return objects;
@@ -131,42 +136,51 @@ function human(bytes) {
 }
 
 async function main() {
-  console.log(`Project: ${SUPABASE_URL}`);
+  const app = initializeFirebase();
+  const db = getFirestore(app);
+  const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+  const bucket = getStorage(app).bucket(bucketName || undefined);
+  if (!bucket.name) throw new Error("Firebase Storage bucket is not configured.");
+
+  console.log(`Project: ${app.options.projectId}`);
+  console.log(`Bucket:  ${bucket.name}`);
   console.log(`Mode:    ${DELETE ? "DELETE" : "dry run (nothing is removed)"}`);
   console.log("");
 
   const [profilePaths, submissionPaths, stored] = await Promise.all([
-    fetchReferencedPaths("profiles"),
-    fetchReferencedPaths("student_submissions"),
-    listFolder(""),
+    fetchReferencedPaths(db, bucket.name, "profiles"),
+    fetchReferencedPaths(db, bucket.name, "student_submissions"),
+    listAvatarFiles(bucket),
   ]);
-
   const referenced = new Set([...profilePaths, ...submissionPaths]);
-  const orphans = stored.filter((object) => !referenced.has(object.name));
   const unrecognised = stored.filter((object) => !PATH_PATTERN.test(object.name));
 
-  const orphanBytes = orphans.reduce((sum, object) => sum + object.size, 0);
   console.log(`Stored objects:      ${stored.length}`);
-  console.log(`Referenced by rows:  ${referenced.size}`);
-  console.log(`Orphaned:            ${orphans.length} (${human(orphanBytes)})`);
+  console.log(`Referenced by docs:  ${referenced.size}`);
+  console.log(
+    `Orphaned:            ${stored.filter((object) => !referenced.has(object.name)).length}`,
+  );
 
   if (unrecognised.length > 0) {
-    console.log(
-      `\nRefusing to continue: ${unrecognised.length} object(s) do not look like ` +
-        `<user_id>/<uuid>.<ext>. Review them in the dashboard first:`,
+    console.error(
+      `\nRefusing to continue: ${unrecognised.length} object(s) do not match ` +
+        "avatars/{uid}/{uuid}.{jpg|jpeg|png|webp}. Review them first:",
     );
-    for (const object of unrecognised.slice(0, 20)) console.log(`  - ${object.name}`);
-    process.exit(2);
+    for (const object of unrecognised.slice(0, 20)) console.error(`  - ${object.name}`);
+    process.exitCode = 2;
+    return;
   }
 
+  const orphans = stored.filter((object) => !referenced.has(object.name));
   if (orphans.length === 0) {
     console.log("\nNothing to prune.");
     return;
   }
 
-  const sorted = [...orphans].sort((a, b) => b.size - a.size);
+  const orphanBytes = orphans.reduce((sum, object) => sum + object.size, 0);
+  console.log(`Orphaned size:       ${human(orphanBytes)}`);
   console.log("\nLargest orphans:");
-  for (const object of sorted.slice(0, 15)) {
+  for (const object of [...orphans].sort((a, b) => b.size - a.size).slice(0, 15)) {
     console.log(`  ${human(object.size).padStart(9)}  ${object.name}`);
   }
 
@@ -177,12 +191,9 @@ async function main() {
 
   let removed = 0;
   let freed = 0;
-  for (let i = 0; i < orphans.length; i += BATCH_SIZE) {
-    const batch = orphans.slice(i, i + BATCH_SIZE);
-    await request(`/storage/v1/object/${BUCKET}`, {
-      method: "DELETE",
-      body: JSON.stringify({ prefixes: batch.map((object) => object.name) }),
-    });
+  for (let index = 0; index < orphans.length; index += DELETE_BATCH_SIZE) {
+    const batch = orphans.slice(index, index + DELETE_BATCH_SIZE);
+    for (const object of batch) await object.file.delete();
     removed += batch.length;
     freed += batch.reduce((sum, object) => sum + object.size, 0);
     console.log(`  removed ${removed}/${orphans.length}`);
@@ -192,6 +203,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`\nFailed: ${error.message}`);
-  process.exit(1);
+  console.error(`\nFailed: ${error instanceof Error ? error.message : String(error)}`);
+  process.exitCode = 1;
 });

@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ─── users ────────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'photoURL',
+          'lastSignIn',
+          'emailNotifications'
+        ])
+        && request.auth.token.email_verified == true
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.emailNotifications is bool
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 120;
+      allow delete: if false;
+    }
+
+    // ─── notices ──────────────────────────────────────────────────────────────
+    // Students can only read published notices.
+    // Admins can read all (including drafts) and write.
+    match /notices/{noticeId} {
+      allow read: if isSignedIn() && (resource.data.isPublished == true || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // ─── routine_recurring ────────────────────────────────────────────────────
+    match /routine_recurring/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ─── routine_exceptions ───────────────────────────────────────────────────
+    match /routine_exceptions/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ─── academic_tasks ───────────────────────────────────────────────────────
+    match /academic_tasks/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ─── mail ─────────────────────────────────────────────────────────────────
+    // Only Cloud Functions (via Admin SDK) write here.
+    // The Trigger Email extension reads from this collection.
+    match /mail/{id} {
+      allow read, write: if false; // Admin SDK bypasses rules
+    }
+
+    // ─── email_preferences ────────────────────────────────────────────────────
+    // Users manage their own notification preferences.
+    match /email_preferences/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['emailNotifications', 'updatedAt'])
+        && request.resource.data.emailNotifications is bool;
+    }
+
+    // ─── Default deny ─────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

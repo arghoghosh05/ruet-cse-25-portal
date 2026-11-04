@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import Image from "next/image";
 import { ArrowUpRight, LockKeyhole, UserRound } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
+import { getFirebaseUser } from "../../lib/firebase-session";
+import { isAdminEmail } from "../../lib/admin-auth";
 
 export default async function Navbar() {
-  const isAdminSignedIn =
-    (await headers()).get("x-ruet-admin-authenticated") === "true";
+  const user = await getFirebaseUser();
+  const isAdminSignedIn = isAdminEmail(user?.email);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#2F4858] text-[#DDFBEF] shadow-[0_8px_28px_rgba(27,48,59,0.12)]">
@@ -18,6 +19,7 @@ export default async function Navbar() {
             width={40}
             height={40}
             priority
+            unoptimized
             className="h-10 w-10 object-contain"
           />
           <span className="leading-tight">

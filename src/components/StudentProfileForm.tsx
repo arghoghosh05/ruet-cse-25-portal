@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useActionState } from "react";
-import { createClient } from "../../utils/supabase/client";
+import { auth, storage } from "@/lib/firebase";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import {
   compressProfileImage,
   hasValidImageSignature,
@@ -43,27 +44,30 @@ export default function StudentProfileForm({
           return { error: "The selected file is not a valid image." };
         }
 
-        const supabase = createClient();
-        const { data, error: authError } = await supabase.auth.getUser();
-        if (authError || !data.user) {
-          return { error: "Your session has expired. Sign in again and retry." };
-        }
-
-        const uploadFile = await compressProfileImage(imageFile);
-        const uploadExtension = profileImageExtensions[uploadFile.type];
-        if (!uploadExtension) {
-          return { error: "The selected image could not be prepared for upload. Please try another photo." };
-        }
-
-        const imagePath = `${data.user.id}/${crypto.randomUUID()}.${uploadExtension}`;
-        const { error: uploadError } = await supabase.storage
-          .from("avatars")
-          .upload(imagePath, uploadFile, { contentType: uploadFile.type, upsert: false });
-        if (uploadError) {
-          console.error("Student image upload failed:", uploadError.message);
+        try {
+          const currentUser = auth?.currentUser;
+          if (!currentUser || !storage) {
+            return { error: "Sign in with Google before uploading a profile photo." };
+          }
+          const uploadFile = await compressProfileImage(imageFile);
+          const uploadExtension = profileImageExtensions[uploadFile.type];
+          if (!uploadExtension || uploadFile.size > 1_500_000) {
+            return { error: "The compressed photo is too large. Choose a smaller image." };
+          }
+          const imagePath = `avatars/${currentUser.uid}/${crypto.randomUUID()}.${uploadExtension}`;
+          const storageRef = ref(storage, imagePath);
+          await uploadBytes(storageRef, uploadFile, {
+            contentType: uploadFile.type,
+          });
+          const downloadUrl = await getDownloadURL(storageRef);
+          formData.set("image_path", downloadUrl);
+        } catch (uploadError) {
+          console.error(
+            "Student image upload to Firebase Storage failed:",
+            uploadError instanceof Error ? uploadError.message : uploadError,
+          );
           return { error: "The image could not be uploaded. Please try again." };
         }
-        formData.set("image_path", imagePath);
       }
 
       await action(formData);

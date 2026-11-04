@@ -22,10 +22,11 @@ export default function HomePage() {
               Rajshahi University of Engineering & Technology
             </div>
             <h1 className="max-w-3xl text-5xl font-semibold leading-[1.04] tracking-[-0.055em] text-[#2F4858] sm:text-6xl lg:text-[4.55rem]">
-              Your batch.
-              <br />
-              <span className="font-normal text-[#557268]">All in one place.</span>
+              RUET CSE 25
             </h1>
+            <p className="mt-2 text-2xl font-normal tracking-[-0.04em] text-[#557268] sm:text-3xl">
+              Student Portal &amp; Batch Directory
+            </p>
             <p className="mt-6 max-w-xl text-base leading-7 text-[#2F4858]/75 sm:text-lg sm:leading-8">
               A home for the RUET CSE ’25 community. Find your classmates, explore the sections, and keep the batch connected.
             </p>
@@ -80,7 +81,7 @@ export default function HomePage() {
                 <div className="absolute h-52 w-52 rounded-full border border-[#DDFBEF]/10 sm:h-64 sm:w-64" />
                 <div className="absolute h-40 w-40 rounded-full border border-[#DDFBEF]/15 sm:h-48 sm:w-48" />
                 <div className="relative flex h-32 w-32 items-center justify-center rounded-full border border-[#DDFBEF]/20 bg-[#DDFBEF]/10 shadow-[0_0_70px_rgba(221,251,239,0.12)] sm:h-40 sm:w-40">
-                  <Image src="/ruet-logo.png" alt="RUET emblem" width={112} height={112} priority className="h-24 w-24 object-contain sm:h-28 sm:w-28" />
+                  <Image src="/ruet-logo.png" alt="RUET emblem" width={112} height={112} priority unoptimized className="h-24 w-24 object-contain sm:h-28 sm:w-28" />
                 </div>
                 <p className="relative mt-7 text-xs font-medium uppercase tracking-[0.28em] text-[#DDFBEF]/55">Computer Science & Engineering</p>
                 <p className="relative mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">RUET CSE ’25</p>

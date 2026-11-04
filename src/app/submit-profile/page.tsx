@@ -2,13 +2,12 @@ import Link from "next/link";
 import { ArrowLeft, CheckCircle2, Clock3, ShieldCheck } from "lucide-react";
 import Navbar from "../../components/ui/Navbar";
 import StudentEmailAccess from "../../components/StudentEmailAccess";
-import StudentPasswordSetup from "../../components/StudentPasswordSetup";
 import StudentSubmissionForm from "../../components/StudentSubmissionForm";
 import StudentOwnProfileForm from "../../components/StudentOwnProfileForm";
-import SubmitButton from "../../components/SubmitButton";
+import FirebaseSignOutButton from "../../components/FirebaseSignOutButton";
 import ToastAlert from "../../components/ToastAlert";
-import { logoutStudent } from "./actions";
-import { createClient } from "../../../utils/supabase/server";
+import { getFirebaseAdmin } from "../../../lib/firebase-admin";
+import { getFirebaseUser } from "../../lib/firebase-session";
 import { getCanonicalDistrictName } from "../../lib/districts";
 
 export const metadata = {
@@ -19,25 +18,9 @@ export const metadata = {
 export default async function SubmitProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string; setup?: string; roll?: string }>;
+  searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  const { error, success, setup, roll: setupRoll } = await searchParams;
-  const supabase = await createClient();
-  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
-  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null;
-
-  if (!claimsError && claimsData?.claims?.sub) {
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError) {
-      console.error("Failed to verify student submission session:", userError.message);
-      throw new Error("Your sign-in status could not be checked. Please reload the page.");
-    }
-    user = userData.user;
-  }
-
-  let studentAccount: { roll: number; status: string; has_profile: boolean } | null = null;
-  let latestSubmission: { id: string; status: string; roll: number } | null = null;
-  let profileAlreadyExists = false;
+  const [{ error, success }, user] = await Promise.all([searchParams, getFirebaseUser()]);
   let ownProfile: {
     full_name: string;
     nickname: string | null;
@@ -51,70 +34,112 @@ export default async function SubmitProfilePage({
     facebook_url: string | null;
     image_url: string | null;
   } | null = null;
-  if (user) {
-    const { data: accountData, error: accountError } = await supabase
-      .from("student_accounts")
-      .select("roll, status, has_profile")
-      .eq("user_id", user.id)
-      .maybeSingle();
+  let latestSubmission: { status: string; roll: number } | null = null;
 
-    if (accountError) {
-      console.error("Failed to load student account status:", accountError.message);
-      throw new Error("Your account status is temporarily unavailable.");
-    }
-    studentAccount = accountData;
-
-    if (studentAccount?.status === "approved" && !studentAccount.has_profile) {
-      const { data: existingProfile, error: existingProfileError } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("roll", studentAccount.roll)
-        .maybeSingle();
-
-      if (existingProfileError) {
-        console.error("Failed to check for an existing student profile:", existingProfileError.message);
-        throw new Error("Your profile status is temporarily unavailable.");
-      }
-      profileAlreadyExists = Boolean(existingProfile);
-    }
-
-    if (studentAccount?.status === "approved" && studentAccount.has_profile) {
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("full_name, nickname, roll, section, email, address, phone_number, whatsapp_number, blood_group, facebook_url, image_url")
-        .eq("roll", studentAccount.roll)
-        .maybeSingle();
-
-      if (profileError) {
-        console.error("Failed to load the student's own profile:", profileError.message);
-        throw new Error("Your approved profile is temporarily unavailable.");
-      }
-      ownProfile = profileData
-        ? {
-            ...profileData,
-            address: getCanonicalDistrictName(profileData.address),
-            email: profileData.email ?? user.email ?? null,
-          }
-        : null;
-    }
-
-    if (studentAccount?.status === "approved" && !studentAccount.has_profile) {
-      const { data, error: submissionError } = await supabase
-      .from("student_submissions")
-      .select("id, status, roll")
-      .eq("user_id", user.id)
-      .order("submitted_at", { ascending: false })
-      .order("id", { ascending: false })
+  if (user?.uid && user.email && user.email_verified) {
+    const { db } = getFirebaseAdmin();
+    const uid = user.uid;
+    const verifiedEmail = user.email.trim().toLowerCase();
+    const existingOwner = await db.collection("profiles")
+      .where("owner_uid", "==", uid)
       .limit(1)
-      .maybeSingle();
+      .get();
+    let profileDoc = existingOwner.docs[0];
 
-      if (submissionError) {
-        console.error("Failed to load student's submission status:", submissionError.message);
-        throw new Error("Your submission status is temporarily unavailable.");
+    if (!profileDoc) {
+      const emailMatch = await db.collection("profiles")
+        .where("email", "==", verifiedEmail)
+        .limit(2)
+        .get();
+      if (emailMatch.size === 1) {
+        const candidate = emailMatch.docs[0];
+        const linked = await db.runTransaction(async (transaction) => {
+          const current = await transaction.get(candidate.ref);
+          const profile = current.data();
+          if (
+            current.exists &&
+            profile &&
+            (!profile.owner_uid || profile.owner_uid === uid) &&
+            typeof profile.email === "string" &&
+            profile.email.trim().toLowerCase() === verifiedEmail
+          ) {
+            transaction.update(candidate.ref, {
+              owner_uid: uid,
+              updated_at: new Date().toISOString(),
+            });
+            return true;
+          }
+          return false;
+        });
+        if (linked) profileDoc = candidate;
       }
-      latestSubmission = data;
+    }
+
+    if (profileDoc) {
+      const profile = profileDoc.data();
+      if (profile && profile.owner_uid === uid) {
+        ownProfile = {
+          full_name: profile.full_name ?? "",
+          nickname: profile.nickname ?? null,
+          roll: Number(profile.roll) || 0,
+          section: profile.section ?? "",
+          email: profile.email ?? user.email,
+          address: getCanonicalDistrictName(profile.address ?? ""),
+          phone_number: profile.phone_number ?? "",
+          whatsapp_number: profile.whatsapp_number ?? "",
+          blood_group: profile.blood_group ?? null,
+          facebook_url: profile.facebook_url ?? null,
+          image_url: profile.image_url ?? null,
+        };
+      }
+    }
+
+    let submission = await db.collection("student_submissions").doc(uid).get();
+    if (!submission.exists || submission.data()?.status !== "pending") {
+      const emailSubmissions = await db.collection("student_submissions")
+        .where("email", "==", verifiedEmail)
+        .where("status", "==", "pending")
+        .limit(2)
+        .get();
+      if (emailSubmissions.size > 1) {
+        throw new Error("More than one pending submission matches this verified email.");
+      }
+      if (emailSubmissions.size === 1) {
+        const candidate = emailSubmissions.docs[0];
+        const rollRef = db.collection("profile_rolls").doc(String(candidate.get("roll")));
+        const linkedSubmission = await db.runTransaction(async (transaction) => {
+          const [current, reservation] = await Promise.all([
+            transaction.get(candidate.ref),
+            transaction.get(rollRef),
+          ]);
+          const data = current.data();
+          const reservationData = reservation.data();
+          if (
+            !current.exists ||
+            data?.status !== "pending" ||
+            typeof data.email !== "string" ||
+            data.email.trim().toLowerCase() !== verifiedEmail ||
+            (data.user_id && data.user_id !== uid) ||
+            !reservation.exists ||
+            reservationData?.status !== "pending" ||
+            reservationData.submission_id !== candidate.id
+          ) {
+            return false;
+          }
+          transaction.update(candidate.ref, { user_id: uid });
+          transaction.update(rollRef, { user_id: uid });
+          return true;
+        });
+        if (linkedSubmission) submission = await candidate.ref.get();
+      }
+    }
+    if (submission.exists) {
+      const data = submission.data()!;
+      latestSubmission = { status: data.status ?? "", roll: Number(data.roll) || 0 };
     }
   }
+
+  const userIsVerified = Boolean(user?.uid && user.email && user.email_verified);
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -132,7 +157,7 @@ export default async function SubmitProfilePage({
         <section className="overflow-hidden rounded-[1.75rem] border border-[#2F4858]/10 bg-[#F8FCF9] shadow-[0_24px_65px_rgba(47,72,88,0.12)]">
           <header className="bg-[#2F4858] px-6 py-7 text-[#DDFBEF] sm:px-9 sm:py-9">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-[#DDFBEF]/15 bg-white/5">
-              {user ? <ShieldCheck aria-hidden="true" size={23} /> : <CheckCircle2 aria-hidden="true" size={23} />}
+              {userIsVerified ? <ShieldCheck aria-hidden="true" size={23} /> : <CheckCircle2 aria-hidden="true" size={23} />}
             </div>
             <p className="mt-5 text-xs font-semibold uppercase tracking-[0.2em] text-[#DDFBEF]/65">RUET CSE ’25 directory</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">Add your profile</h1>
@@ -142,40 +167,17 @@ export default async function SubmitProfilePage({
           </header>
 
           <div className="p-6 sm:p-9">
-            {!user ? (
+            {!userIsVerified ? (
               <StudentEmailAccess />
-            ) : !user.email_confirmed_at ? (
-              <StudentEmailAccess />
-            ) : setup === "1" && /^\d{7}$/.test(setupRoll ?? "") ? (
-              <StudentPasswordSetup roll={setupRoll!} />
-            ) : !studentAccount ? (
-              setupRoll && /^\d{7}$/.test(setupRoll) ? (
-                <StudentPasswordSetup roll={setupRoll} />
-              ) : (
-                <StudentEmailAccess />
-              )
-            ) : studentAccount.has_profile ? (
-              ownProfile ? (
-                <div className="space-y-4">
-                  <StudentOwnProfileForm profile={ownProfile} />
-                  <Link
-                    href={`/sections/${studentAccount.roll <= 2503060 ? "a" : studentAccount.roll <= 2503120 ? "b" : "c"}`}
-                    className="inline-flex min-h-10 items-center justify-center rounded-lg border border-[#2F4858]/15 px-4 text-sm font-semibold text-[#2F4858] transition hover:bg-white"
-                  >
-                    View your section directory
-                  </Link>
-                </div>
-              ) : (
-                <div role="alert" className="rounded-xl border border-[#E2B7A9] bg-[#FFF3EF] px-4 py-3 text-sm leading-6 text-[#733F36]">
-                  Your account is approved, but its profile record is not available. Please contact a portal admin.
-                </div>
-              )
-            ) : profileAlreadyExists ? (
-              <div role="status" className="rounded-2xl border border-[#2F4858]/10 bg-white p-5 sm:p-6">
-                <h2 className="font-semibold text-[#2F4858]">Your account is ready</h2>
-                <p className="mt-1 text-sm leading-6 text-[#2F4858]/70">
-                  A directory profile already exists for this roll, but its ownership has not been linked to your verified email. Contact an admin to verify and link the profile. You can log in now; profile editing remains restricted to its verified owner.
-                </p>
+            ) : ownProfile ? (
+              <div className="space-y-4">
+                <StudentOwnProfileForm profile={ownProfile} />
+                <Link
+                  href={`/sections/${ownProfile.roll <= 2503060 ? "a" : ownProfile.roll <= 2503120 ? "b" : "c"}`}
+                  className="inline-flex min-h-10 items-center justify-center rounded-lg border border-[#2F4858]/15 px-4 text-sm font-semibold text-[#2F4858] transition hover:bg-white"
+                >
+                  View your section directory
+                </Link>
               </div>
             ) : latestSubmission?.status === "pending" ? (
               <div className="rounded-2xl border border-[#2F4858]/10 bg-white p-5 sm:p-6">
@@ -184,18 +186,13 @@ export default async function SubmitProfilePage({
                   <div>
                     <h2 className="font-semibold text-[#2F4858]">Profile approval pending</h2>
                     <p className="mt-1 text-sm leading-6 text-[#2F4858]/70">
-                      Roll {latestSubmission.roll} is safely submitted. An admin will review it before it appears publicly. After approval, your profile details will appear here and you can edit only your own profile.
+                      Roll {latestSubmission.roll} is submitted and private while an admin reviews it.
                     </p>
                   </div>
                 </div>
-                <form action={logoutStudent} className="mt-5">
-                  <SubmitButton
-                    pendingText="Signing out…"
-                    className="inline-flex min-h-10 items-center justify-center rounded-lg border border-[#2F4858]/15 px-4 text-sm font-semibold text-[#2F4858] transition hover:bg-[#DDFBEF]/60"
-                  >
-                    Sign out
-                  </SubmitButton>
-                </form>
+                <div className="mt-5">
+                  <FirebaseSignOutButton className="inline-flex min-h-10 items-center justify-center rounded-lg border border-[#2F4858]/15 px-4 text-sm font-semibold text-[#2F4858] transition hover:bg-[#DDFBEF]/60 disabled:opacity-60" />
+                </div>
               </div>
             ) : latestSubmission?.status === "approved" ? (
               <div className="rounded-2xl border border-[#B8D9C5] bg-[#F0FBF4] p-5 sm:p-6">
@@ -204,23 +201,17 @@ export default async function SubmitProfilePage({
                   <div>
                     <h2 className="font-semibold text-[#2F4858]">You’re in the directory</h2>
                     <p className="mt-1 text-sm leading-6 text-[#2F4858]/70">
-                      Your profile was approved. You can find it in the student directory.
+                      Your profile is approved. If it is not linked to your account yet, contact a portal admin.
                     </p>
                   </div>
                 </div>
-                <form action={logoutStudent} className="mt-5">
-                  <SubmitButton
-                    pendingText="Signing out…"
-                    className="inline-flex min-h-10 items-center justify-center rounded-lg border border-[#2F4858]/15 px-4 text-sm font-semibold text-[#2F4858] transition hover:bg-white"
-                  >
-                    Sign out
-                  </SubmitButton>
-                </form>
+                <div className="mt-5">
+                  <FirebaseSignOutButton className="inline-flex min-h-10 items-center justify-center rounded-lg border border-[#2F4858]/15 px-4 text-sm font-semibold text-[#2F4858] transition hover:bg-white disabled:opacity-60" />
+                </div>
               </div>
             ) : (
               <StudentSubmissionForm
-                roll={studentAccount.roll}
-                email={user.email ?? ""}
+                email={user?.email ?? ""}
                 wasRejected={latestSubmission?.status === "rejected"}
               />
             )}

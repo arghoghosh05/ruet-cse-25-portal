@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { createClient } from "../../../../utils/supabase/server";
 import { BLOOD_GROUPS } from "../../../lib/student";
 import { BANGLADESH_DISTRICTS } from "../../../lib/districts";
-import { isAdminIdentity } from "../../../lib/admin-auth";
-import { addStudent, logoutAdmin } from "../actions";
+import { getFirebaseUser } from "../../../lib/firebase-session";
+import { isAdminEmail } from "../../../lib/admin-auth";
+import { addStudent } from "../actions";
 import StudentProfileForm from "../../../components/StudentProfileForm";
 import ContactNumberFields from "../../../components/ContactNumberFields";
 import AdminRecords from "../../../components/AdminRecords";
@@ -13,7 +13,9 @@ import AutoSection from "../../../components/AutoSection";
 import Navbar from "../../../components/ui/Navbar";
 import SubmitButton from "../../../components/SubmitButton";
 import ToastAlert from "../../../components/ToastAlert";
-import { LogOut, Plus, ShieldCheck, UserRound } from "lucide-react";
+import FirebaseSignOutButton from "../../../components/FirebaseSignOutButton";
+import { Plus, ShieldCheck, UserRound } from "lucide-react";
+import { getFirebaseAdmin } from "../../../../lib/firebase-admin";
 
 export const metadata: Metadata = {
   title: "Admin dashboard",
@@ -26,34 +28,82 @@ export default async function AdminDashboard({
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   const { error, success } = await searchParams;
-  const supabase = await createClient();
-  const { data, error: authError } = await supabase.auth.getClaims();
-  const claims = data?.claims;
-
-  if (authError || !claims?.sub || !isAdminIdentity(claims.email, claims.app_metadata)) {
+  const user = await getFirebaseUser();
+  if (!user?.email || !isAdminEmail(user.email)) {
     redirect("/admin/login?error=Admin access is required.");
   }
 
-  const { data: records, error: recordsError } = await supabase
-    .from("profiles")
-    .select("id, full_name, nickname, roll, section, email, blood_group, image_url, created_at")
-    .order("created_at", { ascending: false });
+  const { db } = getFirebaseAdmin();
+  const [recordsSnapshot, submissionsSnapshot] = await Promise.all([
+    db.collection("profiles").limit(250).get(),
+    db.collection("student_submissions")
+      .where("status", "==", "pending")
+      .limit(100)
+      .get(),
+  ]);
 
-  if (recordsError) {
-    console.error("Failed to load admin student records:", recordsError.message);
-    throw new Error("Admin records are temporarily unavailable.");
-  }
+  let records: Array<{
+    id: string;
+    full_name: string | null;
+    nickname: string | null;
+    roll: number | string;
+    section: string;
+    email: string | null;
+    blood_group: string | null;
+    image_url: string | null;
+    created_at?: string;
+  }> = [];
 
-  const { data: submissions, error: submissionsError } = await supabase
-    .from("student_submissions")
-    .select("id, full_name, nickname, roll, section, address, phone_number, whatsapp_number, blood_group, email, facebook_url, image_url, submitted_at")
-    .eq("status", "pending")
-    .order("submitted_at", { ascending: true });
+  records = recordsSnapshot.docs.map((docSnap) => {
+    const docData = docSnap.data();
+    return {
+      id: docSnap.id,
+      full_name: docData.full_name ?? null,
+      nickname: docData.nickname ?? null,
+      roll: docData.roll ?? "",
+      section: docData.section ?? "",
+      email: docData.email ?? null,
+      blood_group: docData.blood_group ?? null,
+      image_url: docData.image_url ?? null,
+    };
+  });
+  records.sort((a, b) => (Number(b.roll) || 0) - (Number(a.roll) || 0));
 
-  if (submissionsError) {
-    console.error("Failed to load student submissions:", submissionsError.message);
-    throw new Error("Student submissions are temporarily unavailable.");
-  }
+  let submissions: Array<{
+    id: string;
+    full_name: string;
+    nickname: string | null;
+    roll: number;
+    section: string;
+    address: string;
+    phone_number: string;
+    whatsapp_number: string;
+    blood_group: string | null;
+    email: string | null;
+    facebook_url: string | null;
+    image_url: string | null;
+    submitted_at: string;
+  }> = [];
+
+  submissions = submissionsSnapshot.docs.map((docSnap) => {
+    const docData = docSnap.data();
+    return {
+      id: docSnap.id,
+      full_name: docData.full_name ?? "",
+      nickname: docData.nickname ?? null,
+      roll: Number(docData.roll) || 0,
+      section: docData.section ?? "",
+      address: docData.address ?? "",
+      phone_number: docData.phone_number ?? "",
+      whatsapp_number: docData.whatsapp_number ?? "",
+      blood_group: docData.blood_group ?? null,
+      email: docData.email ?? null,
+      facebook_url: docData.facebook_url ?? null,
+      image_url: docData.image_url ?? null,
+      submitted_at: docData.submitted_at ?? "",
+    };
+  });
+  submissions.sort((a, b) => a.submitted_at.localeCompare(b.submitted_at));
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -72,19 +122,16 @@ export default async function AdminDashboard({
               <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Admin dashboard</h1>
               <p className="mt-2 flex items-center gap-1.5 break-all text-xs text-[#DDFBEF]/65 sm:text-sm">
                 <UserRound aria-hidden="true" size={14} className="shrink-0" />
-                Signed in as {claims.email}
+                Signed in as {user.email}
               </p>
             </div>
           </div>
-          <form action={logoutAdmin}>
-            <button type="submit" className="inline-flex min-h-10 items-center justify-center gap-2 self-start rounded-lg border border-[#DDFBEF]/20 px-3.5 text-sm font-medium text-[#DDFBEF]/85 transition hover:border-[#DDFBEF]/40 hover:bg-white/5 hover:text-white sm:self-auto">
-              <LogOut aria-hidden="true" size={16} /> Sign out
-            </button>
-          </form>
+          <FirebaseSignOutButton className="inline-flex min-h-10 items-center justify-center gap-2 self-start rounded-lg border border-[#DDFBEF]/20 px-3.5 text-sm font-medium text-[#DDFBEF]/85 transition hover:border-[#DDFBEF]/40 hover:bg-white/5 hover:text-white disabled:opacity-60 sm:self-auto" />
         </header>
 
         <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)] lg:gap-7">
-          <section aria-labelledby="add-student-heading" className="rounded-[1.5rem] bg-[#2F4858] p-5 text-[#DDFBEF] shadow-[0_18px_48px_rgba(47,72,88,0.13)] sm:p-7">
+          <div className="space-y-6">
+            <section aria-labelledby="add-student-heading" className="rounded-[1.5rem] bg-[#2F4858] p-5 text-[#DDFBEF] shadow-[0_18px_48px_rgba(47,72,88,0.13)] sm:p-7">
             <div className="mb-6 flex items-start gap-3.5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#DDFBEF] text-[#2F4858]">
                 <Plus aria-hidden="true" size={20} />
@@ -164,10 +211,11 @@ export default async function AdminDashboard({
                 <Plus aria-hidden="true" size={17} /> Add to directory
               </SubmitButton>
             </StudentProfileForm>
-          </section>
+            </section>
+            <PendingSubmissions submissions={submissions ?? []} />
+          </div>
 
           <div className="space-y-6">
-            <PendingSubmissions submissions={submissions ?? []} />
             <AdminRecords records={records ?? []} />
           </div>
         </div>
