@@ -1,48 +1,43 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  hasValidImageSignature,
-  maxProfileImageSize,
-  profileImageExtensions,
-} from "./profile-image";
+import "server-only";
+
+import { getFirebaseAdmin } from "../../lib/firebase-admin";
 
 export async function getVerifiedProfileImageUrl(
-  supabase: SupabaseClient,
-  imagePath: string,
-  userId: string,
-) {
-  if (!imagePath) return null;
-  const match = imagePath.match(
-    /^([0-9a-f-]{36})\/([0-9a-f-]{36})\.(jpg|png|webp)$/,
-  );
-  if (!match || match[1] !== userId) return null;
+  imagePath?: string | null,
+  userId?: string,
+): Promise<string | null> {
+  if (!imagePath?.trim()) return null;
+  if (!userId) throw new Error("An authenticated account is required to verify images.");
 
-  const extension = match[3];
-  const contentType = Object.entries(profileImageExtensions).find(([, ext]) => ext === extension)?.[0];
-  if (!contentType) return null;
-
-  const { data } = supabase.storage.from("avatars").getPublicUrl(imagePath);
-  try {
-    const headResponse = await fetch(data.publicUrl, { method: "HEAD", cache: "no-store" });
-    const actualSize = Number(headResponse.headers.get("content-length"));
-    if (
-      !headResponse.ok ||
-      headResponse.headers.get("content-type")?.split(";")[0] !== contentType ||
-      !Number.isSafeInteger(actualSize) ||
-      actualSize <= 0 ||
-      actualSize > maxProfileImageSize
-    ) {
-      return null;
-    }
-
-    const imageResponse = await fetch(data.publicUrl, {
-      headers: { Range: "bytes=0-11" },
-      cache: "no-store",
-    });
-    if (!imageResponse.ok) return null;
-    const signature = new Uint8Array(await imageResponse.arrayBuffer());
-    return hasValidImageSignature(contentType, signature) ? data.publicUrl : null;
-  } catch (error) {
-    console.error("Failed to verify uploaded student image:", error);
-    return null;
+  const url = new URL(imagePath.trim());
+  if (url.protocol !== "https:" || url.hostname !== "firebasestorage.googleapis.com") {
+    throw new Error("Profile photos must be stored in this Firebase project.");
   }
+
+  const match = url.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/);
+  if (!match) throw new Error("Invalid Firebase Storage download URL.");
+
+  const bucketName = decodeURIComponent(match[1]);
+  const objectPath = decodeURIComponent(match[2]);
+  if (!objectPath.startsWith(`avatars/${userId}/`) || objectPath.length > 512) {
+    throw new Error("The uploaded profile photo does not belong to this account.");
+  }
+
+  const { bucket } = getFirebaseAdmin();
+  if (bucket.name !== bucketName) {
+    throw new Error("The uploaded profile photo belongs to another Firebase project.");
+  }
+
+  const [metadata] = await bucket.file(objectPath).getMetadata();
+  const size = Number(metadata.size);
+  if (
+    !Number.isFinite(size) ||
+    size <= 0 ||
+    size > 1_500_000 ||
+    !["image/jpeg", "image/png", "image/webp"].includes(metadata.contentType ?? "")
+  ) {
+    throw new Error("The uploaded file is not a supported profile photo.");
+  }
+
+  return url.toString();
 }

@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { getFirebaseAdmin } from "../../lib/firebase-admin";
 
 const semesters = ["1-1", "1-2", "2-1", "2-2", "3-1", "3-2", "4-1", "4-2"] as const;
 const categories = ["ct", "final", "notes", "books"] as const;
@@ -40,19 +40,62 @@ type TelegramUpdate = {
   callback_query?: TelegramCallback;
 };
 
+function isTelegramMessage(value: unknown): value is TelegramMessage {
+  if (typeof value !== "object" || value === null || !("chat" in value)) return false;
+  const message = value as Partial<TelegramMessage>;
+  return Number.isSafeInteger(message.message_id) &&
+    typeof message.chat === "object" && message.chat !== null &&
+    Number.isSafeInteger(message.chat.id) && typeof message.chat.type === "string" &&
+    (message.text === undefined || typeof message.text === "string") &&
+    (message.from === undefined ||
+      (typeof message.from === "object" && message.from !== null &&
+        Number.isSafeInteger(message.from.id) && message.from.id > 0)) &&
+    (message.document === undefined ||
+      (typeof message.document === "object" && message.document !== null &&
+        typeof message.document.file_id === "string" &&
+        message.document.file_id.length > 0 &&
+        message.document.file_id.length <= 512 &&
+        (message.document.file_name === undefined ||
+          typeof message.document.file_name === "string") &&
+        (message.document.mime_type === undefined ||
+          typeof message.document.mime_type === "string")));
+}
+
+export function isTelegramUpdate(value: unknown): value is TelegramUpdate {
+  if (typeof value !== "object" || value === null || !("update_id" in value)) return false;
+  const update = value as Partial<TelegramUpdate>;
+  if (!Number.isSafeInteger(update.update_id) || (update.update_id ?? -1) < 0) return false;
+  if (update.message !== undefined && !isTelegramMessage(update.message)) return false;
+  if (update.callback_query !== undefined) {
+    const callback = update.callback_query;
+    if (
+      typeof callback !== "object" || callback === null ||
+      typeof callback.id !== "string" ||
+      typeof callback.from !== "object" || callback.from === null ||
+      !Number.isSafeInteger(callback.from.id) || callback.from.id <= 0 ||
+      (callback.data !== undefined &&
+        (typeof callback.data !== "string" || callback.data.length > 256)) ||
+      (callback.message !== undefined && !isTelegramMessage(callback.message))
+    ) return false;
+  }
+  return true;
+}
+
 type InlineKeyboard = {
   inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
 };
 
-type UploadSession = {
-  telegram_user_id: number;
-  telegram_chat_id: number;
+interface UploadSession {
+  id: string;
+  telegramUserId: number;
+  telegramChatId: number;
   stage: UploadStage;
   semester: Semester | null;
   category: Category | null;
-  ct_number: number | null;
+  ctNumber: number | null;
   title: string | null;
-};
+  updatedAt?: string;
+}
 
 const semesterLabel = (semester: Semester) => `Semester ${semester}`;
 const isSemester = (value: string): value is Semester =>
@@ -69,18 +112,18 @@ function getAdminUserIds() {
   );
 }
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) {
-    throw new Error("Telegram resource bot database configuration is missing.");
-  }
-  return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-      persistSession: false,
-    },
+function getDb() {
+  return getFirebaseAdmin().db;
+}
+
+function uploadSessionRef(userId: number) {
+  return getDb().collection("telegram_upload_sessions").doc(String(userId));
+}
+
+async function saveUploadSession(session: UploadSession) {
+  await uploadSessionRef(session.telegramUserId).set({
+    ...session,
+    updatedAt: new Date().toISOString(),
   });
 }
 
@@ -190,25 +233,24 @@ async function showResourceList(
   ctNumber: number | null,
   offset: number,
 ) {
-  const supabase = getSupabaseAdmin();
-  let query = supabase
-    .from("telegram_resources")
-    .select("id, title, file_name, created_at")
-    .eq("semester", semester)
-    .eq("category", category)
-    .order("created_at", { ascending: false })
-    .range(offset, offset + 7);
+  let query = getDb().collection("telegram_resources")
+    .where("semester", "==", semester)
+    .where("category", "==", category)
+    .orderBy("createdAt", "desc")
+    .offset(offset)
+    .limit(9);
+  if (category === "ct") query = query.where("ctNumber", "==", ctNumber) as typeof query;
 
-  if (category === "ct") query = query.eq("ct_number", ctNumber);
-
-  const { data, error } = await query;
-  if (error) throw new Error("Unable to load Telegram resources.");
-
-  const buttons = (data ?? []).map((resource) => [{
+  const snapshot = await query.get();
+  const resources = snapshot.docs.slice(0, 8).map((resource) => ({
+    id: resource.id,
+    title: typeof resource.get("title") === "string" ? resource.get("title") as string : "Untitled resource",
+  }));
+  const buttons = resources.map((resource) => [{
     text: resource.title.slice(0, 60),
     callback_data: `file:${resource.id}`,
   }]);
-  if (data?.length === 8) {
+  if (snapshot.size > 8) {
     buttons.push([{
       text: "More resources",
       callback_data: `list:${semester}:${category}:${ctNumber ?? 0}:${offset + 8}`,
@@ -220,7 +262,7 @@ async function showResourceList(
     ? `CT ${ctNumber} questions`
     : categoryLabels[category];
   const heading = `${semesterLabel(semester)} · ${categoryLabel}`;
-  const text = data?.length
+  const text = resources.length
     ? `${heading}\nChoose a resource to receive it in this chat.`
     : `${heading}\nNo resources have been added here yet.`;
   await editMessage(callback, text, { inline_keyboard: buttons });
@@ -247,18 +289,16 @@ async function handleCallback(callback: TelegramCallback) {
       await answerCallback(callback, "Uploads are limited to authorized resource managers.");
       return;
     }
-    const supabase = getSupabaseAdmin();
-    const { error } = await supabase.from("telegram_resource_upload_sessions").upsert({
-      telegram_user_id: senderId,
-      telegram_chat_id: chat.id,
+    await saveUploadSession({
+      id: String(senderId),
+      telegramUserId: senderId,
+      telegramChatId: chat.id,
       stage: "semester",
       semester: null,
       category: null,
-      ct_number: null,
+      ctNumber: null,
       title: null,
-      updated_at: new Date().toISOString(),
     });
-    if (error) throw new Error("Unable to start a resource upload.");
     await answerCallback(callback);
     await editMessage(callback, "Choose the semester for this resource:", semesterKeyboard("upsem"));
     return;
@@ -279,18 +319,16 @@ async function handleCallback(callback: TelegramCallback) {
   }
 
   if (action === "upsem" && first && isSemester(first) && getAdminUserIds().has(senderId)) {
-    const supabase = getSupabaseAdmin();
-    const { error } = await supabase.from("telegram_resource_upload_sessions").upsert({
-      telegram_user_id: senderId,
-      telegram_chat_id: chat.id,
+    await saveUploadSession({
+      id: String(senderId),
+      telegramUserId: senderId,
+      telegramChatId: chat.id,
       stage: "category",
       semester: first,
       category: null,
-      ct_number: null,
+      ctNumber: null,
       title: null,
-      updated_at: new Date().toISOString(),
     });
-    if (error) throw new Error("Unable to save the upload semester.");
     await answerCallback(callback);
     await editMessage(callback, `Choose a resource type for ${semesterLabel(first)}:`, categoryKeyboard(first, "upcat"));
     return;
@@ -319,19 +357,17 @@ async function handleCallback(callback: TelegramCallback) {
   }
 
   if (action === "upcat" && first && isSemester(first) && second && isCategory(second) && getAdminUserIds().has(senderId)) {
-    const supabase = getSupabaseAdmin();
     const nextStage: UploadStage = second === "ct" ? "ct" : "title";
-    const { error } = await supabase.from("telegram_resource_upload_sessions").upsert({
-      telegram_user_id: senderId,
-      telegram_chat_id: chat.id,
+    await saveUploadSession({
+      id: String(senderId),
+      telegramUserId: senderId,
+      telegramChatId: chat.id,
       stage: nextStage,
       semester: first,
       category: second,
-      ct_number: null,
+      ctNumber: null,
       title: null,
-      updated_at: new Date().toISOString(),
     });
-    if (error) throw new Error("Unable to save the resource type.");
     await answerCallback(callback);
     if (second === "ct") {
       await editMessage(callback, "Choose the CT number:", {
@@ -347,19 +383,17 @@ async function handleCallback(callback: TelegramCallback) {
   }
 
   if (action === "upct" && first && /^[1-4]$/.test(first) && getAdminUserIds().has(senderId)) {
-    const supabase = getSupabaseAdmin();
-    const { data, error } = await supabase
-      .from("telegram_resource_upload_sessions")
-      .update({ stage: "title", ct_number: Number(first), updated_at: new Date().toISOString() })
-      .eq("telegram_user_id", senderId)
-      .eq("stage", "ct")
-      .select("telegram_user_id")
-      .maybeSingle();
-    if (error) throw new Error("Unable to save the CT number.");
-    if (!data) {
+    const sessionRef = uploadSessionRef(senderId);
+    const sessionSnap = await sessionRef.get();
+    if (!sessionSnap.exists || sessionSnap.get("stage") !== "ct") {
       await answerCallback(callback, "That upload has expired. Start again with /upload.");
       return;
     }
+    await sessionRef.update({
+      stage: "title",
+      ctNumber: Number(first),
+      updatedAt: new Date().toISOString(),
+    });
     await answerCallback(callback);
     await editMessage(callback, `CT ${first} selected. Send a short title for this resource.`);
     return;
@@ -368,7 +402,10 @@ async function handleCallback(callback: TelegramCallback) {
   if (action === "list" && first && isSemester(first) && second && isCategory(second) && third && /^\d+$/.test(third) && fourth && /^\d+$/.test(fourth)) {
     const ctNumber = Number(third);
     const offset = Number(fourth);
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000) {
+    if (
+      !Number.isSafeInteger(offset) || offset < 0 || offset > 10000 ||
+      (second === "ct" && (!Number.isInteger(ctNumber) || ctNumber < 1 || ctNumber > 4))
+    ) {
       await answerCallback(callback, "That resource page is unavailable.");
       return;
     }
@@ -377,28 +414,29 @@ async function handleCallback(callback: TelegramCallback) {
     return;
   }
 
-  if (action === "file" && first && /^[0-9a-f-]{36}$/i.test(first)) {
-    const supabase = getSupabaseAdmin();
-    const { data: resource, error } = await supabase
-      .from("telegram_resources")
-      .select("title, file_id, semester, category, ct_number")
-      .eq("id", first)
-      .maybeSingle();
-    if (error) throw new Error("Unable to load the requested resource.");
-    if (!resource) {
+  if (action === "file" && first && /^[A-Za-z0-9_-]{1,150}$/.test(first)) {
+    const resourceSnap = await getDb().collection("telegram_resources").doc(first).get();
+    if (!resourceSnap.exists) {
       await answerCallback(callback, "This resource is no longer available.");
       return;
     }
+    const resource = resourceSnap.data();
+    if (!resource || !isSemester(String(resource.semester)) ||
+        typeof resource.category !== "string" || !isCategory(resource.category) ||
+        typeof resource.fileId !== "string" ||
+        typeof resource.title !== "string") {
+      throw new Error("The requested resource record is invalid.");
+    }
 
     await answerCallback(callback, "Sending resource…");
-    const caption = `${semesterLabel(resource.semester as Semester)} · ${
+    const caption = `${semesterLabel(resource.semester)} · ${
       resource.category === "ct"
-        ? `CT ${resource.ct_number} questions`
-        : categoryLabels[resource.category as Category]
+        ? `CT ${resource.ctNumber} questions`
+        : categoryLabels[resource.category]
     }\n${resource.title}`;
     await callTelegram("sendDocument", {
       chat_id: chat.id,
-      document: resource.file_id,
+      document: resource.fileId,
       caption: caption.slice(0, 1000),
     });
     return;
@@ -408,22 +446,32 @@ async function handleCallback(callback: TelegramCallback) {
 }
 
 async function getUploadSession(userId: number) {
-  const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("telegram_resource_upload_sessions")
-    .select("telegram_user_id, telegram_chat_id, stage, semester, category, ct_number, title")
-    .eq("telegram_user_id", userId)
-    .maybeSingle();
-  if (error) throw new Error("Unable to load the resource upload session.");
-  return data as UploadSession | null;
+  const snapshot = await uploadSessionRef(userId).get();
+  if (!snapshot.exists) return null;
+  const data = snapshot.data();
+  if (
+    !data ||
+    !Number.isSafeInteger(data.telegramUserId) ||
+    !Number.isSafeInteger(data.telegramChatId) ||
+    !["semester", "category", "ct", "title", "document"].includes(data.stage)
+  ) {
+    throw new Error("The Telegram upload session is invalid.");
+  }
+  return {
+    id: snapshot.id,
+    telegramUserId: data.telegramUserId as number,
+    telegramChatId: data.telegramChatId as number,
+    stage: data.stage as UploadStage,
+    semester: isSemester(String(data.semester)) ? data.semester as Semester : null,
+    category: isCategory(String(data.category)) ? data.category as Category : null,
+    ctNumber: Number.isInteger(data.ctNumber) ? data.ctNumber as number : null,
+    title: typeof data.title === "string" ? data.title : null,
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : undefined,
+  } satisfies UploadSession;
 }
 
 async function deleteUploadSession(userId: number) {
-  const { error } = await getSupabaseAdmin()
-    .from("telegram_resource_upload_sessions")
-    .delete()
-    .eq("telegram_user_id", userId);
-  if (error) throw new Error("Unable to clear the resource upload session.");
+  await uploadSessionRef(userId).delete();
 }
 
 async function handleMessage(message: TelegramMessage) {
@@ -447,17 +495,16 @@ async function handleMessage(message: TelegramMessage) {
       await sendMessage(message.chat.id, "Uploads are limited to authorized resource managers.");
       return;
     }
-    const { error } = await getSupabaseAdmin().from("telegram_resource_upload_sessions").upsert({
-      telegram_user_id: senderId,
-      telegram_chat_id: message.chat.id,
+    await saveUploadSession({
+      id: String(senderId),
+      telegramUserId: senderId,
+      telegramChatId: message.chat.id,
       stage: "semester",
       semester: null,
       category: null,
-      ct_number: null,
+      ctNumber: null,
       title: null,
-      updated_at: new Date().toISOString(),
     });
-    if (error) throw new Error("Unable to start a resource upload.");
     await sendMessage(message.chat.id, "Choose the semester for this resource:", semesterKeyboard("upsem"));
     return;
   }
@@ -479,34 +526,34 @@ async function handleMessage(message: TelegramMessage) {
       await sendMessage(message.chat.id, "Send a title between 1 and 160 characters, or /cancel.");
       return;
     }
-    const { error } = await getSupabaseAdmin()
-      .from("telegram_resource_upload_sessions")
-      .update({ title, stage: "document", updated_at: new Date().toISOString() })
-      .eq("telegram_user_id", senderId);
-    if (error) throw new Error("Unable to save the resource title.");
+    await uploadSessionRef(senderId).update({
+      title,
+      stage: "document",
+      updatedAt: new Date().toISOString(),
+    });
     await sendMessage(message.chat.id, "Now upload the resource as a document (PDF, image, or office file). Use /cancel to stop.");
     return;
   }
 
   if (session.stage === "document" && message.document) {
     if (!session.semester || !session.category || !session.title ||
-        (session.category === "ct" && !session.ct_number)) {
+        (session.category === "ct" && !session.ctNumber)) {
       await deleteUploadSession(senderId);
       await sendMessage(message.chat.id, "That upload session is incomplete. Start again with /upload.");
       return;
     }
-    const supabase = getSupabaseAdmin();
-    const { error } = await supabase.from("telegram_resources").insert({
+    const resourceRef = getDb().collection("telegram_resources").doc();
+    await resourceRef.create({
       semester: session.semester,
       category: session.category,
-      ct_number: session.category === "ct" ? session.ct_number : null,
+      ctNumber: session.category === "ct" ? session.ctNumber : null,
       title: session.title,
-      file_id: message.document.file_id,
-      file_name: message.document.file_name?.slice(0, 255) ?? null,
-      mime_type: message.document.mime_type?.slice(0, 128) ?? null,
-      uploaded_by: senderId,
+      fileId: message.document.file_id.slice(0, 512),
+      fileName: message.document.file_name?.slice(0, 255) ?? null,
+      mimeType: message.document.mime_type?.slice(0, 128) ?? null,
+      uploadedBy: senderId,
+      createdAt: new Date().toISOString(),
     });
-    if (error) throw new Error("Unable to save the uploaded resource.");
     await deleteUploadSession(senderId);
     await sendMessage(message.chat.id, `Added “${session.title}” to ${semesterLabel(session.semester)} ${categoryLabels[session.category]}.`, homeKeyboard(true));
     return;
@@ -529,24 +576,42 @@ async function processUpdate(update: TelegramUpdate) {
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate) {
-  const supabase = getSupabaseAdmin();
-  const { error: duplicateError } = await supabase
-    .from("telegram_resource_updates")
-    .insert({ update_id: update.update_id });
-  if (duplicateError?.code === "23505") return;
-  if (duplicateError) throw new Error("Unable to record the Telegram update.");
+  if (!Number.isSafeInteger(update.update_id) || update.update_id < 0) {
+    throw new Error("Invalid Telegram update ID.");
+  }
+  const updateRef = getDb().collection("telegram_updates").doc(String(update.update_id));
+  const claimed = await getDb().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(updateRef);
+    if (snapshot.get("status") === "complete") return false;
+    const leaseUntil = snapshot.get("leaseUntil");
+    if (
+      snapshot.exists &&
+      typeof leaseUntil === "string" &&
+      Date.parse(leaseUntil) > Date.now()
+    ) {
+      throw new Error("Telegram update is already being processed.");
+    }
+    transaction.set(updateRef, {
+      status: "processing",
+      leaseUntil: new Date(Date.now() + 60_000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    return true;
+  });
+  if (!claimed) return;
 
   try {
     await processUpdate(update);
   } catch (error) {
-    await supabase.from("telegram_resource_updates").delete().eq("update_id", update.update_id);
+    await updateRef.delete();
     throw error;
   }
 
-  await supabase
-    .from("telegram_resource_updates")
-    .delete()
-    .lt("created_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+  await updateRef.set({
+    status: "complete",
+    completedAt: new Date().toISOString(),
+    leaseUntil: null,
+  }, { merge: true });
 }
 
 export function isValidTelegramWebhookSecret(received: string | null) {

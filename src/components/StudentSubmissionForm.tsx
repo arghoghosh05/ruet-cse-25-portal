@@ -1,21 +1,17 @@
 import { Check, UserRoundPlus } from "lucide-react";
-import { submitStudentProfile } from "../app/submit-profile/actions";
+import { submitStudentProfile } from "../app/admin/actions";
 import { BANGLADESH_DISTRICTS } from "../lib/districts";
 import { BLOOD_GROUPS } from "../lib/student";
 import ContactNumberFields from "./ContactNumberFields";
 import StudentProfileForm from "./StudentProfileForm";
 
 export default function StudentSubmissionForm({
-  roll,
   email,
   wasRejected = false,
 }: {
-  roll: number;
   email: string;
   wasRejected?: boolean;
 }) {
-  const section = roll <= 2503060 ? "A" : roll <= 2503120 ? "B" : "C";
-
   return (
     <div>
       {wasRejected && (
@@ -27,7 +23,7 @@ export default function StudentSubmissionForm({
       <div className="mb-6">
         <h2 className="text-lg font-semibold text-[#2F4858]">Your student details</h2>
         <p className="mt-1 text-sm leading-6 text-[#2F4858]/70">
-          Complete the same profile details shown in the directory. Your verified email, roll, and section are fixed to your account.
+          Complete the same profile details shown in the directory. Your verified Google email is attached to your submission, and your section is assigned from your roll number.
         </p>
       </div>
 
@@ -40,11 +36,11 @@ export default function StudentSubmissionForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="portal-label !text-[#2F4858]" htmlFor="submission-roll">Roll number</label>
-            <input id="submission-roll" name="roll" type="text" value={roll} readOnly className="portal-field cursor-not-allowed" />
+            <input id="submission-roll" name="roll" type="text" inputMode="numeric" pattern="[0-9]{7}" maxLength={7} required placeholder="Enter your 7-digit roll" className="portal-field" />
           </div>
           <div>
-            <label className="portal-label !text-[#2F4858]" htmlFor="submission-section">Section</label>
-            <input id="submission-section" type="text" value={section} readOnly className="portal-field cursor-not-allowed" />
+            <span className="portal-label !text-[#2F4858]">Section</span>
+            <p className="portal-field bg-[#DDFBEF]/40">Automatically assigned from your roll</p>
           </div>
           <div>
             <label className="portal-label !text-[#2F4858]" htmlFor="submission-email">Verified email</label>

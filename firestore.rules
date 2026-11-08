@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // The portal accesses Firestore through authenticated server handlers only.
+    // Server authorization is enforced by Firebase session-cookie verification.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

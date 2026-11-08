@@ -1,4 +1,8 @@
-import { handleTelegramUpdate, isValidTelegramWebhookSecret } from "../../../../lib/telegram-resources";
+import {
+  handleTelegramUpdate,
+  isTelegramUpdate,
+  isValidTelegramWebhookSecret,
+} from "../../../../lib/telegram-resources";
 
 export const runtime = "nodejs";
 
@@ -23,17 +27,11 @@ export async function POST(request: Request) {
     } catch {
       return Response.json({ error: "Invalid JSON" }, { status: 400 });
     }
-    if (
-      typeof update !== "object" ||
-      update === null ||
-      !("update_id" in update) ||
-      typeof update.update_id !== "number" ||
-      !Number.isSafeInteger(update.update_id)
-    ) {
+    if (!isTelegramUpdate(update)) {
       return Response.json({ error: "Invalid Telegram update" }, { status: 400 });
     }
 
-    await handleTelegramUpdate(update as Parameters<typeof handleTelegramUpdate>[0]);
+    await handleTelegramUpdate(update);
     return Response.json({ ok: true });
   } catch (error) {
     console.error("Telegram resource webhook failed:", error);

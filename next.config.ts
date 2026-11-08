@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   experimental: {
+    agentUpgrade: "security",
     serverActions: {
       bodySizeLimit: "2mb",
     },
@@ -10,8 +11,12 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "**.supabase.co",
-        pathname: "/storage/v1/object/public/avatars/**",
+        hostname: "firebasestorage.googleapis.com",
+        pathname: "/v0/b/**",
+      },
+      {
+        protocol: "https",
+        hostname: "**.firebasestorage.app",
       },
     ],
   },
