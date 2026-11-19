@@ -18,10 +18,24 @@ A dedicated web platform designed for the students of the Computer Science & Eng
 ---
 
 ## 🛠️ Tech Stack
-- **Framework:** Next.js (App Router)
+- **Framework:** Next.js (App Router, Turbopack)
 - **Language:** TypeScript
 - **Styling:** Tailwind CSS
+- **Database & Auth & Storage:** Google Firebase (Cloud Firestore, Firebase Auth, Cloud Storage)
 - **Deployment:** Vercel
+
+---
+
+## 🔐 Authentication & Database
+
+The portal uses **Google Firebase**:
+- **Authentication:** Supports 1-click **"Continue with Google"** and Roll Number / Email authentication for students and administrators.
+- **Database (Cloud Firestore):** Schema-less NoSQL document store with instant writes and zero manual SQL migrations.
+- **Storage (Cloud Storage):** 5 GB free storage for optimized student profile photos with client-side canvas compression and server-side magic byte validation.
+
+For the complete setup or migration instructions, see [FIREBASE_SETUP_AND_MIGRATION_GUIDE.md](FIREBASE_SETUP_AND_MIGRATION_GUIDE.md).
+
+---
 
 ## 🤖 CSE ’25 Telegram Resources Bot
 
@@ -57,90 +71,15 @@ The webhook validates Telegram’s secret-token header, ignores group chats,
 and restricts uploads to the configured uploader IDs. Students can browse and
 receive files in private chat without signing in to the website.
 
-## 🗄️ Database Migration
+## 🗄️ Firebase Setup & Migration
 
-To enable student self-submissions and roll-number/password accounts, run
-`supabase/migrations/20261002020000_student_self_submissions.sql`, followed by
-`supabase/migrations/20261002030000_student_roll_password_accounts.sql`, in the
-Supabase SQL Editor. In Supabase Authentication, enable the Email provider and
-enable new user signups, and set the Site URL to
-`https://ruetcse25.vercel.app`. Configure a custom SMTP provider under
-**Supabase Dashboard → Authentication → SMTP Settings**. Supabase’s default
-sender is restricted to project-team email addresses and is rate-limited.
-Under **Authentication → Email Templates → Confirm signup**, include
-`{{ .Token }}` in the message so students can enter the email OTP on the
-portal. The account flow accepts 6–8 digit codes and verifies the OTP directly rather than following an
-email link, avoiding one-time link scanners and cross-browser PKCE issues.
-Students request access with their roll number and email, enter the emailed
-code, then set their own password. They log in with roll number and password;
-passwords are never sent by email. Students can log in immediately after email
-verification and password setup; account claims do not require admin approval.
-Profile submissions still require a separate admin review before publishing.
-Submissions include the complete directory profile fields: nickname, district,
-phone and WhatsApp numbers, blood group, Facebook link, and optional photo.
-The verified email, roll, and section are tied to the account rather than
-editable form fields. After profile approval, students can edit only their own
-profile from the same page. Profile information stays private until approved,
-and verification emails are never published.
+Everything you need to configure a new Firebase project or migrate an existing Supabase instance is documented in [FIREBASE_SETUP_AND_MIGRATION_GUIDE.md](FIREBASE_SETUP_AND_MIGRATION_GUIDE.md).
 
-After the roll/password account migration, also run
-`supabase/migrations/20261002040000_student_complete_profiles.sql` to enable
-complete student profiles and owner-only profile editing. Then run
-`supabase/migrations/20261002050000_remove_student_account_approval.sql` to
-remove account-claim approval and immediately enable roll/password login after
-email verification and password setup. Profile submissions remain subject to
-admin approval. For existing directory profiles, an admin must link ownership
-to the matching verified email before that account can edit the existing data.
-Then run `supabase/migrations/20261002060000_student_own_profile_read.sql` so
-students can load their own linked profile without an admin session; other
-students cannot read it through authenticated access.
-The profile-read migration does not remove account-claim approval; migration
-`20261002050000_remove_student_account_approval.sql` must also be applied.
-Run `supabase/migrations/20261003010000_admin_delete_shared_profiles.sql` to
-allow authorized admins to delete any directory profile, including records
-created by a different admin.
+- **Automated Migration Script:** If you have existing data in Supabase, run `node scripts/migrate-from-supabase.mjs` to automatically transfer all profiles, student accounts, submissions, telegram resources, and avatars to Firebase.
+- **Rules Deployment:** Security rules are configured in `firestore.rules` and `storage.rules`.
+- **Avatar Pruning:** Clean up orphaned storage objects with `node scripts/prune-avatars.mjs`.
 
-Set the server-only Vercel environment variable `SUPABASE_SERVICE_ROLE_KEY`
-for the environments where students log in. This allows the server to securely
-map a roll number to its verified account email; never prefix it with
-`NEXT_PUBLIC_` or expose it to the browser.
-
-Before deploying student email and blood-group fields, run
-`supabase/migrations/20260930010000_add_student_email_and_blood_group.sql`
-in the Supabase SQL Editor for the project used by this site. Both fields are
-optional; values provided for them appear in the public section directory.
-
-To support optional student nicknames in the admin forms and public directory,
-also run `supabase/migrations/20261002000000_add_student_nickname.sql` in that
-same Supabase project before deploying the nickname-enabled application.
-
-For admin access controls and directory performance, also run
-`supabase/migrations/20260930020000_admin_authorization_and_directory_performance.sql`.
-Run `supabase/migrations/20260930030000_shared_admin_student_records.sql` to
-allow authorized admins to view and manage records created by former admins.
-Run `supabase/migrations/20260930040000_admin_database_allowlist.sql` to
-enforce the admin allowlist directly in Supabase. Removing an email from
-`private.admin_allowlist` revokes database access immediately, including for
-already-issued JWTs. Add and remove admins in that table and keep it aligned
-with the server-only Vercel `ADMIN_EMAILS` variable.
-Set the server-only Vercel environment variable `ADMIN_EMAILS` to the comma-separated
-addresses allowed to sign in as administrators. For each approved Supabase Auth
-user, set the immutable `app_metadata` field `role` to `admin` in Supabase Auth
-user management; do not use editable `user_metadata` for authorization. After
-changing app metadata, have the user sign out and back in so the new role is
-included in their token. The database allowlist migration also grants that role
-to the seven initially configured admin email addresses that already exist.
-
-Run `supabase/migrations/20261002010000_set_avatar_upload_limit_15mb.sql` in the
-Supabase SQL Editor to raise the avatar bucket limit. Images are uploaded
-directly to Supabase Storage, avoiding Vercel's function request-body limit, and
-are restricted to PNG, JPEG, and WebP files up to 15 MB.
-
-The public directory query is cached for five minutes and invalidated after
-student changes. Admins must provide a phone number and either a separate
-WhatsApp number or confirm that both numbers are the same. A large traffic burst still depends on the Vercel and Supabase plans,
-regional capacity, and database limits; it requires load testing against those
-specific production quotas before a 100,000-visitor guarantee can be made.
+---
 
 ---
 

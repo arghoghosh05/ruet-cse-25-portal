@@ -1,9 +1,9 @@
-import type { NextRequest } from "next/server";
-import { isAdminIdentity } from "./lib/admin-auth";
-import { updateSession } from "../utils/supabase/proxy";
+import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
-  return updateSession(request, isAdminIdentity);
+  // Pass through response with Next.js standard headers
+  const response = NextResponse.next();
+  return response;
 }
 
 export const config = {

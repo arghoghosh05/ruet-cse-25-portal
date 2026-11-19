@@ -3,6 +3,7 @@
 import { Check, Clock3, MapPin, X } from "lucide-react";
 import { reviewStudentSubmission } from "../app/admin/actions";
 import SubmitButton from "./SubmitButton";
+import { isSafeExternalUrl } from "../lib/student";
 
 type StudentSubmission = {
   id: string;
@@ -58,7 +59,7 @@ export default function PendingSubmissions({ submissions }: { submissions: Stude
                     <div><dt className="inline text-[#2F4858]/55">WhatsApp: </dt><dd className="inline text-[#2F4858]">{submission.whatsapp_number}</dd></div>
                     {submission.email && <div><dt className="inline text-[#2F4858]/55">Verified email: </dt><dd className="inline break-all text-[#2F4858]">{submission.email}</dd></div>}
                     {submission.blood_group && <div><dt className="inline text-[#2F4858]/55">Blood group: </dt><dd className="inline text-[#2F4858]">{submission.blood_group}</dd></div>}
-                    {submission.facebook_url && (
+                    {submission.facebook_url && isSafeExternalUrl(submission.facebook_url) && (
                       <div>
                         <dt className="inline text-[#2F4858]/55">Facebook: </dt>
                         <dd className="inline"><a href={submission.facebook_url} target="_blank" rel="noopener noreferrer" className="break-all text-[#2F4858] underline underline-offset-2">{submission.facebook_url}</a></dd>

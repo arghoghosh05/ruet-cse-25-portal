@@ -43,7 +43,9 @@ const details = [
 
 function toWhatsAppNumber(value: string) {
   const digits = value.replace(/\D/g, "");
-  if (digits.startsWith("00")) return digits.slice(2);
+  if (digits.startsWith("00880")) return digits.slice(2);
+  if (digits.startsWith("880")) return digits;
+  if (digits.startsWith("01")) return `880${digits.slice(1)}`;
   if (digits.startsWith("0")) return `880${digits.slice(1)}`;
   return digits;
 }

@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
-import { createClient } from "../../../../utils/supabase/server";
 import { BLOOD_GROUPS } from "../../../lib/student";
 import { BANGLADESH_DISTRICTS } from "../../../lib/districts";
-import { isAdminIdentity } from "../../../lib/admin-auth";
+import { requireAdminSession } from "../../../lib/firebase/session";
+import { adminDb } from "../../../lib/firebase/admin";
 import { addStudent, logoutAdmin } from "../actions";
 import StudentProfileForm from "../../../components/StudentProfileForm";
 import ContactNumberFields from "../../../components/ContactNumberFields";
@@ -26,33 +25,90 @@ export default async function AdminDashboard({
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   const { error, success } = await searchParams;
-  const supabase = await createClient();
-  const { data, error: authError } = await supabase.auth.getClaims();
-  const claims = data?.claims;
+  const adminUser = await requireAdminSession();
 
-  if (authError || !claims?.sub || !isAdminIdentity(claims.email, claims.app_metadata)) {
-    redirect("/admin/login?error=Admin access is required.");
+  // Load records from Firestore
+  let records: Array<{
+    id: string;
+    full_name: string | null;
+    nickname: string | null;
+    roll: number;
+    section: string;
+    email: string | null;
+    blood_group: string | null;
+    image_url: string | null;
+    created_at: string;
+  }> = [];
+
+  try {
+    const recordsSnapshot = await adminDb
+      .collection("profiles")
+      .orderBy("created_at", "desc")
+      .get();
+
+    records = recordsSnapshot.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        full_name: d.full_name ?? null,
+        nickname: d.nickname ?? null,
+        roll: d.roll ?? Number(doc.id),
+        section: d.section ?? "",
+        email: d.email ?? null,
+        blood_group: d.blood_group ?? null,
+        image_url: d.image_url ?? null,
+        created_at: d.created_at ?? "",
+      };
+    });
+  } catch (err) {
+    console.error("Failed to load admin records from Firestore:", err);
   }
 
-  const { data: records, error: recordsError } = await supabase
-    .from("profiles")
-    .select("id, full_name, nickname, roll, section, email, blood_group, image_url, created_at")
-    .order("created_at", { ascending: false });
+  // Load pending submissions
+  let submissions: Array<{
+    id: string;
+    full_name: string;
+    nickname: string | null;
+    roll: number;
+    section: string;
+    address: string;
+    phone_number: string;
+    whatsapp_number: string;
+    blood_group: string | null;
+    email: string | null;
+    facebook_url: string | null;
+    image_url: string | null;
+    submitted_at: string;
+  }> = [];
 
-  if (recordsError) {
-    console.error("Failed to load admin student records:", recordsError.message);
-    throw new Error("Admin records are temporarily unavailable.");
-  }
+  try {
+    const subSnapshot = await adminDb
+      .collection("student_submissions")
+      .where("status", "==", "pending")
+      .get();
 
-  const { data: submissions, error: submissionsError } = await supabase
-    .from("student_submissions")
-    .select("id, full_name, nickname, roll, section, address, phone_number, whatsapp_number, blood_group, email, facebook_url, image_url, submitted_at")
-    .eq("status", "pending")
-    .order("submitted_at", { ascending: true });
-
-  if (submissionsError) {
-    console.error("Failed to load student submissions:", submissionsError.message);
-    throw new Error("Student submissions are temporarily unavailable.");
+    submissions = subSnapshot.docs
+      .map((doc) => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          full_name: d.full_name ?? "",
+          nickname: d.nickname ?? null,
+          roll: d.roll ?? 0,
+          section: d.section ?? "",
+          address: d.address ?? "",
+          phone_number: d.phone_number ?? "",
+          whatsapp_number: d.whatsapp_number ?? "",
+          blood_group: d.blood_group ?? null,
+          email: d.email ?? null,
+          facebook_url: d.facebook_url ?? null,
+          image_url: d.image_url ?? null,
+          submitted_at: d.submitted_at ?? "",
+        };
+      })
+      .sort((a, b) => new Date(a.submitted_at).getTime() - new Date(b.submitted_at).getTime());
+  } catch (err) {
+    console.error("Failed to load submissions from Firestore:", err);
   }
 
   return (
@@ -72,7 +128,7 @@ export default async function AdminDashboard({
               <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Admin dashboard</h1>
               <p className="mt-2 flex items-center gap-1.5 break-all text-xs text-[#DDFBEF]/65 sm:text-sm">
                 <UserRound aria-hidden="true" size={14} className="shrink-0" />
-                Signed in as {claims.email}
+                Signed in as {adminUser.email}
               </p>
             </div>
           </div>
@@ -167,8 +223,8 @@ export default async function AdminDashboard({
           </section>
 
           <div className="space-y-6">
-            <PendingSubmissions submissions={submissions ?? []} />
-            <AdminRecords records={records ?? []} />
+            <PendingSubmissions submissions={submissions} />
+            <AdminRecords records={records} />
           </div>
         </div>
       </main>

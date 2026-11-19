@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, FilePenLine } from "lucide-react";
-import { createClient } from "../../../../../utils/supabase/server";
 import { redirect } from "next/navigation";
 import Navbar from "../../../../components/ui/Navbar";
 import { updateStudent } from "../../actions";
@@ -13,7 +12,8 @@ import StudentProfileForm from "../../../../components/StudentProfileForm";
 import ContactNumberFields from "../../../../components/ContactNumberFields";
 import { BLOOD_GROUPS } from "../../../../lib/student";
 import { BANGLADESH_DISTRICTS, getCanonicalDistrictName } from "../../../../lib/districts";
-import { isAdminIdentity } from "../../../../lib/admin-auth";
+import { requireAdminSession } from "../../../../lib/firebase/session";
+import { adminDb } from "../../../../lib/firebase/admin";
 
 export const metadata: Metadata = {
   title: "Edit student record",
@@ -28,25 +28,14 @@ export default async function EditStudentPage({
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   const [{ id }, { error: actionError, success }] = await Promise.all([params, searchParams]);
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
-  const claims = data?.claims;
+  await requireAdminSession();
 
-  if (error || !claims?.sub || !isAdminIdentity(claims.email, claims.app_metadata)) {
-    redirect("/admin/login?error=Admin access is required.");
+  const doc = await adminDb.collection("profiles").doc(id).get();
+  if (!doc.exists) {
+    redirect("/admin/dashboard");
   }
 
-  const { data: student, error: studentError } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (studentError && studentError.code !== "PGRST116") {
-    console.error("Failed to load student record for editing:", studentError.message);
-    throw new Error("Student record is temporarily unavailable.");
-  }
-  if (!student) redirect("/admin/dashboard");
+  const student = doc.data()!;
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -74,7 +63,7 @@ export default async function EditStudentPage({
           </header>
 
           <StudentProfileForm action={updateStudent} className="space-y-7 p-5 sm:p-8">
-            <input type="hidden" name="id" value={student.id} />
+            <input type="hidden" name="id" value={id} />
 
             <section>
               <h2 className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-[#DDFBEF]/65">Student details</h2>

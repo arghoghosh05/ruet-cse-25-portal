@@ -7,17 +7,45 @@ const nextConfig: NextConfig = {
     },
   },
   images: {
-    // Avatar objects are stored under a fresh UUID name on every upload, so an
-    // image URL never changes its content and can be cached for a long time.
-    // This keeps revalidations from pulling the files back out of Supabase.
     minimumCacheTTL: 2678400,
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "**.supabase.co",
-        pathname: "/storage/v1/object/public/avatars/**",
+        hostname: "firebasestorage.googleapis.com",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "storage.googleapis.com",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "lh3.googleusercontent.com",
+        pathname: "/**",
       },
     ],
+  },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+          {
+            key: "X-Frame-Options",
+            value: "DENY",
+          },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+        ],
+      },
+    ];
   },
 };
 

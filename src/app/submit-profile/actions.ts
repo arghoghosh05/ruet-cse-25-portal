@@ -2,37 +2,23 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createClient } from "../../../utils/supabase/server";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { BANGLADESH_DISTRICTS } from "../../lib/districts";
-import { BLOOD_GROUPS, isSafeExternalUrl } from "../../lib/student";
-import { getVerifiedProfileImageUrl } from "../../lib/verified-profile-image";
+import { BLOOD_GROUPS, isSafeExternalUrl, getSectionFromRoll } from "../../lib/student";
+import { getVerifiedProfileImageUrl, deleteAvatarFile } from "../../lib/verified-profile-image";
 import { revalidatePublicDirectories } from "../../lib/revalidate-public-directories";
+import { getSessionUser, createSessionFromIdToken, destroySession } from "../../lib/firebase/session";
+import { adminDb, adminAuth } from "../../lib/firebase/admin";
 
 const validBloodGroups: ReadonlySet<string> = new Set(BLOOD_GROUPS);
-
-function createStudentAuthAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Student authentication requires the server-only SUPABASE_SERVICE_ROLE_KEY environment variable.");
-  }
-
-  return createSupabaseClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-      persistSession: false,
-    },
-  });
-}
 
 function getTextField(formData: FormData, name: string) {
   const value = formData.get(name);
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * Log in using Roll number and Password
+ */
 export async function requestStudentLogin(formData: FormData) {
   const roll = getTextField(formData, "roll");
   const password = getTextField(formData, "password");
@@ -41,47 +27,124 @@ export async function requestStudentLogin(formData: FormData) {
     redirect("/submit-profile?error=Enter your roll number and password.");
   }
 
-  let authAdmin: ReturnType<typeof createStudentAuthAdminClient>;
+  // Look up student account by roll in Firestore
+  const accountDoc = await adminDb.collection("student_accounts").doc(roll).get();
+  if (!accountDoc.exists) {
+    redirect("/submit-profile?error=No account was found for that roll number. Please sign up or continue with Google.");
+  }
+
+  const account = accountDoc.data()!;
+  if (account.status !== "approved") {
+    redirect("/submit-profile?error=Your account is pending review. Please contact an admin.");
+  }
+
   try {
-    authAdmin = createStudentAuthAdminClient();
-  } catch (error) {
-    console.error("Student login is not configured:", error);
-    redirect("/submit-profile?error=Student login setup is incomplete. Please contact the portal admin.");
-  }
+    const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+    if (!apiKey) {
+      throw new Error("Missing NEXT_PUBLIC_FIREBASE_API_KEY");
+    }
 
-  const { data: account, error: accountError } = await authAdmin
-    .from("student_accounts")
-    .select("email, status")
-    .eq("roll", Number(roll))
-    .maybeSingle();
+    const signInRes = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: account.email,
+          password,
+          returnSecureToken: true,
+        }),
+      },
+    );
 
-  if (accountError) {
-    console.error("Failed to look up student login:", accountError.message);
-    redirect("/submit-profile?error=Student login is temporarily unavailable. Please try again later.");
-  }
-  if (!account || account.status !== "approved") {
-    redirect("/submit-profile?error=No account was found for that roll. Create your account first.");
-  }
+    const data = await signInRes.json();
+    if (!signInRes.ok || !data.idToken) {
+      redirect("/submit-profile?error=The roll number or password is incorrect.");
+    }
 
-  const supabase = await createClient();
-  const { error: loginError } = await supabase.auth.signInWithPassword({
-    email: account.email,
-    password,
-  });
-
-  if (loginError) {
+    const sessionRes = await createSessionFromIdToken(data.idToken);
+    if (!sessionRes.success) {
+      redirect("/submit-profile?error=Failed to establish session. Please try again.");
+    }
+  } catch (err: unknown) {
+    if (typeof err === "object" && err !== null && "digest" in err) {
+      throw err;
+    }
+    console.error("Student login error:", err);
     redirect("/submit-profile?error=The roll number or password is incorrect.");
   }
+
   redirect("/submit-profile");
 }
 
+/**
+ * Link a verified Google account to a roll number
+ */
+export async function linkGoogleAccountWithRoll(formData: FormData) {
+  const user = await getSessionUser();
+  if (!user || !user.email) {
+    redirect("/submit-profile?error=Please sign in with Google first.");
+  }
+
+  const roll = getTextField(formData, "roll");
+  if (!/^\d{7}$/.test(roll) || Number(roll) < 2503001 || Number(roll) > 2503180) {
+    redirect(`/submit-profile?link_roll=1&error=${encodeURIComponent("Enter a valid seven-digit CSE 25-series roll number.")}`);
+  }
+
+  const rollNum = Number(roll);
+  const accountRef = adminDb.collection("student_accounts").doc(roll);
+
+  // Check if roll is already claimed
+  const existingAccount = await accountRef.get();
+  if (existingAccount.exists) {
+    const data = existingAccount.data()!;
+    if (data.uid !== user.uid && data.email !== user.email) {
+      redirect(`/submit-profile?link_roll=1&error=${encodeURIComponent("That roll number is already claimed by another account. Contact an admin if this is an error.")}`);
+    }
+  }
+
+  // Check if user already linked another roll
+  const userAccounts = await adminDb.collection("student_accounts").where("uid", "==", user.uid).get();
+  if (!userAccounts.empty && userAccounts.docs[0].id !== roll) {
+    redirect(`/submit-profile?error=${encodeURIComponent("Your Google account is already linked to a different roll number.")}`);
+  }
+
+  // Check if profile exists
+  const profileDoc = await adminDb.collection("profiles").doc(roll).get();
+  const hasProfile = profileDoc.exists;
+
+  // Atomically save student account
+  await accountRef.set(
+    {
+      roll: rollNum,
+      uid: user.uid,
+      email: user.email.toLowerCase(),
+      status: "approved",
+      has_profile: hasProfile,
+      provider: "google",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { merge: true },
+  );
+
+  redirect("/submit-profile?success=Account successfully linked! You can now submit or manage your profile.");
+}
+
+/**
+ * Create student account with email and password
+ */
 export async function completeStudentAccount(formData: FormData) {
   const roll = getTextField(formData, "roll");
+  const email = getTextField(formData, "email").toLowerCase();
   const password = getTextField(formData, "password");
   const confirmPassword = getTextField(formData, "confirm_password");
 
   if (!/^\d{7}$/.test(roll) || Number(roll) < 2503001 || Number(roll) > 2503180) {
-    redirect("/submit-profile?error=Your verified account is missing a valid roll number. Start account creation again.");
+    redirect("/submit-profile?error=Enter a valid seven-digit CSE 25-series roll number.");
+  }
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    redirect(`/submit-profile?setup=1&roll=${encodeURIComponent(roll)}&error=Enter a valid email address.`);
   }
   if (password.length < 8 || password.length > 72) {
     redirect(`/submit-profile?setup=1&roll=${encodeURIComponent(roll)}&error=Choose a password between 8 and 72 characters.`);
@@ -90,51 +153,59 @@ export async function completeStudentAccount(formData: FormData) {
     redirect(`/submit-profile?setup=1&roll=${encodeURIComponent(roll)}&error=The passwords do not match.`);
   }
 
-  const supabase = await createClient();
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  const user = userData.user;
-  if (userError || !user || !user.email_confirmed_at) {
-    redirect("/submit-profile?error=Verify your email again before setting a password.");
+  // Check if roll already exists
+  const accountRef = adminDb.collection("student_accounts").doc(roll);
+  const existing = await accountRef.get();
+  if (existing.exists) {
+    redirect("/submit-profile?error=That roll number is already registered. Please log in or contact an admin.");
   }
 
-  const { data: accountStatus, error: accountError } = await supabase.rpc(
-    "register_student_account",
-    { p_roll: roll },
-  );
-  if (accountError) {
-    if (accountError.code === "23505") {
-      redirect("/submit-profile?error=That roll number is already linked to another student account. Contact an admin if this is a mistake.");
+  try {
+    // Create user in Firebase Auth
+    let userRecord;
+    try {
+      userRecord = await adminAuth.createUser({
+        email,
+        password,
+        emailVerified: true,
+      });
+    } catch (authErr: any) {
+      if (authErr.code === "auth/email-already-exists") {
+        redirect("/submit-profile?error=An account with this email already exists. Try logging in or use Google sign-in.");
+      }
+      throw authErr;
     }
-    console.error("Failed to register student roll account:", accountError.message);
-    redirect("/submit-profile?error=Your account could not be created. Please try again.");
+
+    const profileDoc = await adminDb.collection("profiles").doc(roll).get();
+
+    await accountRef.set({
+      roll: Number(roll),
+      uid: userRecord.uid,
+      email,
+      status: "approved",
+      has_profile: profileDoc.exists,
+      provider: "password",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+  } catch (err: unknown) {
+    if (typeof err === "object" && err !== null && "digest" in err) {
+      throw err;
+    }
+    console.error("Failed to complete student account:", err);
+    redirect("/submit-profile?error=Failed to create account. Please try again.");
   }
 
-  const { error: passwordError } = await supabase.auth.updateUser({ password });
-  if (passwordError) {
-    console.error("Failed to set student account password:", passwordError.message);
-    redirect(`/submit-profile?setup=1&roll=${encodeURIComponent(roll)}&error=Your password could not be saved. Please try again.`);
-  }
-
-  const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
-  if (signOutError) {
-    console.error("Failed to finish student account setup sign-out:", signOutError.message);
-    redirect(`/submit-profile?success=${encodeURIComponent("Password created. Sign out, then log in with your roll number and password.")}`);
-  }
-
-  if (accountStatus !== "approved") {
-    console.error("Student account registration returned an unexpected status:", accountStatus);
-    redirect("/submit-profile?error=Your account status could not be confirmed. Please contact the portal admin.");
-  }
-  redirect(`/submit-profile?success=${encodeURIComponent("Account created. Log in with your roll number and new password.")}`);
+  redirect("/submit-profile?success=Account created successfully. Log in with your roll number and password.");
 }
 
+/**
+ * Submit student profile for admin review
+ */
 export async function submitStudentProfile(formData: FormData) {
-  const supabase = await createClient();
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  const user = userData.user;
-
-  if (userError || !user || !user.email_confirmed_at) {
-    redirect("/submit-profile?error=Verify your email before submitting a profile.");
+  const user = await getSessionUser();
+  if (!user) {
+    redirect("/submit-profile?error=Your session has expired. Sign in again to submit your profile.");
   }
 
   const fullName = getTextField(formData, "full_name");
@@ -173,55 +244,80 @@ export async function submitStudentProfile(formData: FormData) {
     redirect("/submit-profile?error=Select a valid blood group.");
   }
   if (facebookUrl && (!isSafeExternalUrl(facebookUrl) || facebookUrl.length > 500)) {
-    redirect("/submit-profile?error=Enter a valid Facebook profile URL.");
+    redirect("/submit-profile?error=Enter a valid Facebook profile URL (e.g. https://facebook.com/username).");
   }
   if (!publicConsent) {
     redirect("/submit-profile?error=Please confirm which profile details will be public.");
   }
 
-  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
-  const userId = claimsData?.claims?.sub;
-  if (claimsError || !userId) {
-    redirect("/submit-profile?error=Your session has expired. Sign in again and retry.");
-  }
-  const imageUrl = await getVerifiedProfileImageUrl(supabase, imagePath, userId);
-  if (imagePath && !imageUrl) {
-    redirect("/submit-profile?error=The uploaded image could not be verified.");
+  // Check if profile is already published
+  const existingProfile = await adminDb.collection("profiles").doc(roll).get();
+  if (existingProfile.exists) {
+    redirect("/submit-profile?error=A profile with that roll number is already in the directory.");
   }
 
-  const { error } = await supabase.rpc("submit_student_profile", {
-    p_full_name: fullName,
-    p_roll: roll,
-    p_nickname: nickname || null,
-    p_address: address,
-    p_phone_number: phoneNumber,
-    p_whatsapp_number: whatsappNumber,
-    p_blood_group: bloodGroup || null,
-    p_public_consent: publicConsent,
-    p_facebook_url: facebookUrl || null,
-    p_image_url: imageUrl,
-  });
-
-  if (error) {
-    if (error.code === "23505") {
-      redirect("/submit-profile?error=A profile with that roll number is already registered or awaiting review.");
+  // Verify uploaded image if present
+  let verifiedImage: { url: string; storagePath: string } | null = null;
+  if (imagePath) {
+    verifiedImage = await getVerifiedProfileImageUrl(imagePath, user.uid);
+    if (!verifiedImage) {
+      redirect("/submit-profile?error=The uploaded image could not be verified.");
     }
-    console.error("Failed to submit student profile:", error.message);
-    redirect("/submit-profile?error=Your profile could not be submitted. Please try again.");
   }
+
+  const section = getSectionFromRoll(roll);
+
+  // Store in student_submissions collection
+  await adminDb.collection("student_submissions").add({
+    user_id: user.uid,
+    full_name: fullName,
+    nickname: nickname || null,
+    roll: Number(roll),
+    section,
+    address,
+    phone_number: phoneNumber,
+    whatsapp_number: whatsappNumber,
+    blood_group: bloodGroup || null,
+    email: user.email || null,
+    facebook_url: facebookUrl || null,
+    image_url: verifiedImage ? verifiedImage.url : null,
+    image_storage_path: verifiedImage ? verifiedImage.storagePath : null,
+    public_consent: publicConsent,
+    status: "pending",
+    submitted_at: new Date().toISOString(),
+    reviewed_at: null,
+  });
 
   revalidatePath("/submit-profile");
   revalidatePath("/admin/dashboard");
   redirect("/submit-profile?success=Your profile is submitted and waiting for admin approval.");
 }
 
+/**
+ * Update student's own profile after approval
+ */
 export async function updateOwnStudentProfile(formData: FormData) {
-  const supabase = await createClient();
-  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
-  const userId = claimsData?.claims?.sub;
-  if (claimsError || !userId) {
+  const user = await getSessionUser();
+  if (!user) {
     redirect("/submit-profile?error=Your session has expired. Sign in again to edit your profile.");
   }
+
+  // Find student's linked account
+  const accountQuery = await adminDb.collection("student_accounts").where("uid", "==", user.uid).get();
+  if (accountQuery.empty) {
+    redirect("/submit-profile?error=No linked student account found.");
+  }
+
+  const accountDoc = accountQuery.docs[0];
+  const rollStr = accountDoc.id;
+
+  const profileRef = adminDb.collection("profiles").doc(rollStr);
+  const profileDoc = await profileRef.get();
+  if (!profileDoc.exists) {
+    redirect("/submit-profile?error=Your directory profile was not found.");
+  }
+
+  const currentProfile = profileDoc.data()!;
 
   const fullName = getTextField(formData, "full_name");
   const nickname = getTextField(formData, "nickname");
@@ -234,6 +330,7 @@ export async function updateOwnStudentProfile(formData: FormData) {
   const bloodGroup = getTextField(formData, "blood_group");
   const facebookUrl = getTextField(formData, "facebook_url");
   const imagePath = getTextField(formData, "image_path");
+  const removeImage = getTextField(formData, "remove_image") === "true";
 
   if (fullName.length < 2 || fullName.length > 120) {
     redirect("/submit-profile?error=Enter your full name.");
@@ -254,28 +351,45 @@ export async function updateOwnStudentProfile(formData: FormData) {
     redirect("/submit-profile?error=Select a valid blood group.");
   }
   if (facebookUrl && (!isSafeExternalUrl(facebookUrl) || facebookUrl.length > 500)) {
-    redirect("/submit-profile?error=Enter a valid Facebook profile URL.");
+    redirect("/submit-profile?error=Enter a valid Facebook profile URL (e.g. https://facebook.com/username).");
   }
 
-  const imageUrl = await getVerifiedProfileImageUrl(supabase, imagePath, userId);
-  if (imagePath && !imageUrl) {
-    redirect("/submit-profile?error=The uploaded image could not be verified.");
+  let newImageUrl = currentProfile.image_url;
+  let newStoragePath = currentProfile.image_storage_path;
+
+  // Handle image removal option
+  if (removeImage) {
+    if (currentProfile.image_storage_path) {
+      await deleteAvatarFile(currentProfile.image_storage_path);
+    }
+    newImageUrl = null;
+    newStoragePath = null;
+  } else if (imagePath) {
+    // Handle image update & prune previous file
+    const verifiedImage = await getVerifiedProfileImageUrl(imagePath, user.uid);
+    if (!verifiedImage) {
+      redirect("/submit-profile?error=The uploaded image could not be verified.");
+    }
+    if (currentProfile.image_storage_path && currentProfile.image_storage_path !== verifiedImage.storagePath) {
+      await deleteAvatarFile(currentProfile.image_storage_path);
+    }
+    newImageUrl = verifiedImage.url;
+    newStoragePath = verifiedImage.storagePath;
   }
 
-  const { error } = await supabase.rpc("update_own_student_profile", {
-    p_full_name: fullName,
-    p_nickname: nickname || null,
-    p_address: address,
-    p_phone_number: phoneNumber,
-    p_whatsapp_number: whatsappNumber,
-    p_blood_group: bloodGroup || null,
-    p_facebook_url: facebookUrl || null,
-    p_image_url: imageUrl,
+  await profileRef.update({
+    full_name: fullName,
+    nickname: nickname || null,
+    address,
+    phone_number: phoneNumber,
+    whatsapp_number: whatsappNumber,
+    blood_group: bloodGroup || null,
+    facebook_url: facebookUrl || null,
+    image_url: newImageUrl,
+    image_storage_path: newStoragePath,
+    email: user.email || currentProfile.email,
+    updated_at: new Date().toISOString(),
   });
-  if (error) {
-    console.error("Failed to update own student profile:", error.message);
-    redirect("/submit-profile?error=Your profile could not be updated. Please try again.");
-  }
 
   revalidatePublicDirectories();
   revalidatePath("/submit-profile");
@@ -283,11 +397,6 @@ export async function updateOwnStudentProfile(formData: FormData) {
 }
 
 export async function logoutStudent() {
-  const supabase = await createClient();
-  const { error } = await supabase.auth.signOut({ scope: "local" });
-  if (error) {
-    console.error("Failed to sign out student:", error.message);
-    redirect("/submit-profile?error=Sign out failed. Please try again.");
-  }
+  await destroySession();
   redirect("/");
 }

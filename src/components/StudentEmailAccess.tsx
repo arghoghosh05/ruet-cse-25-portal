@@ -1,276 +1,86 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
-import { KeyRound, LoaderCircle, Mail, Send } from "lucide-react";
-import { createClient } from "../../utils/supabase/client";
-import { requestStudentLogin } from "../app/submit-profile/actions";
+import { useState } from "react";
+import { KeyRound, UserPlus, Lock } from "lucide-react";
+import GoogleSignInButton from "./GoogleSignInButton";
 import SubmitButton from "./SubmitButton";
+import { requestStudentLogin, completeStudentAccount } from "../app/submit-profile/actions";
 
-export default function StudentEmailAccess() {
-  const router = useRouter();
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
-  const [error, setError] = useState("");
-  const [needsSmtpSetup, setNeedsSmtpSetup] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [pendingVerification, setPendingVerification] = useState<{ email: string; roll: string } | null>(null);
-
-  async function requestAccountCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setNeedsSmtpSetup(false);
-    setSending(true);
-    const formData = new FormData(event.currentTarget);
-    const email = String(formData.get("email") ?? "").trim().toLowerCase();
-    const roll = String(formData.get("roll") ?? "").trim();
-
-    if (!/^\d{7}$/.test(roll) || Number(roll) < 2503001 || Number(roll) > 2503180) {
-      setError("Enter your valid seven-digit CSE 25-series roll number.");
-      setSending(false);
-      return;
-    }
-
-    try {
-      const supabase = createClient();
-      const { error: authError } = await supabase.auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: true },
-      });
-
-      if (authError) {
-        const emailNotAuthorized = authError.message.toLowerCase().includes("email address not authorized");
-        console.error("Student account verification email failed:", {
-          code: authError.code,
-          status: authError.status,
-          message: authError.message,
-        });
-        setError(
-          authError.status === 429
-            ? "Too many email requests. Please wait a while before trying again."
-            : emailNotAuthorized
-              ? "Supabase’s default email sender only delivers to authorized project-team addresses. A custom SMTP sender is needed for student accounts."
-              : "We couldn’t send the verification email. Please ask the portal admin to check Supabase email delivery settings, then try again.",
-        );
-        setNeedsSmtpSetup(emailNotAuthorized);
-        return;
-      }
-      setPendingVerification({ email, roll });
-    } catch (requestError) {
-      console.error("Student account verification request failed:", requestError);
-      setError("We couldn’t send the verification email. Please try again in a moment.");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function verifyAccountCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!pendingVerification) return;
-
-    setError("");
-    setSending(true);
-    const formData = new FormData(event.currentTarget);
-    const token = String(formData.get("token") ?? "").trim();
-
-    if (!/^\d{6,8}$/.test(token)) {
-      setError("Enter the 6–8 digit code from the confirmation email.");
-      setSending(false);
-      return;
-    }
-
-    try {
-      const supabase = createClient();
-      const { error: verifyError } = await supabase.auth.verifyOtp({
-        email: pendingVerification.email,
-        token,
-        type: "email",
-      });
-
-      if (verifyError) {
-        console.error("Student account email verification failed:", {
-          code: verifyError.code,
-          status: verifyError.status,
-          message: verifyError.message,
-        });
-        setError(
-          verifyError.code === "otp_expired"
-            ? "That code has expired. Go back and request a new confirmation email."
-            : "That code could not be verified. Check the newest email and enter its code.",
-        );
-        return;
-      }
-
-      router.replace(`/submit-profile?setup=1&roll=${encodeURIComponent(pendingVerification.roll)}`);
-    } catch (verifyError) {
-      console.error("Student account email verification request failed:", verifyError);
-      setError("We couldn’t verify that code. Please try again.");
-    } finally {
-      setSending(false);
-    }
-  }
+export default function StudentEmailAccess({ initialRoll = "" }: { initialRoll?: string }) {
+  const [activeTab, setActiveTab] = useState<"login" | "signup">("login");
 
   return (
-    <div className="space-y-5">
-      <div className="flex rounded-xl bg-[#DDFBEF]/60 p-1">
+    <div className="space-y-6">
+      {/* 1-Click Google Sign In (Primary Action) */}
+      <div className="rounded-2xl border border-[#2F4858]/10 bg-white p-5 shadow-sm sm:p-6 dark:bg-[#1b2d36] dark:border-white/10">
+        <h2 className="text-center text-sm font-semibold text-[#2F4858] dark:text-[#e5f0ea]">
+          Instant sign in with your Google account
+        </h2>
+        <p className="mt-1 text-center text-xs leading-5 text-[#2F4858]/65 dark:text-[#e5f0ea]/70">
+          Fast and verified. Recommended for all CSE ’25 students.
+        </p>
+
+        <div className="mt-4">
+          <GoogleSignInButton
+            label="Continue with Google"
+            redirectTo="/submit-profile"
+          />
+        </div>
+      </div>
+
+      <div className="relative flex items-center justify-center">
+        <div className="w-full border-t border-[#2F4858]/15 dark:border-white/15" />
+        <span className="absolute bg-[#F8FCF9] px-3 text-xs uppercase tracking-wider text-[#2F4858]/55 dark:bg-[#14232b] dark:text-[#e5f0ea]/55">
+          or use roll & password
+        </span>
+      </div>
+
+      {/* Mode Switcher */}
+      <div className="flex rounded-xl bg-[#DDFBEF]/60 p-1 dark:bg-white/5">
         <button
           type="button"
-          onClick={() => {
-            setIsCreatingAccount(false);
-            setError("");
-            setNeedsSmtpSetup(false);
-            setPendingVerification(null);
-          }}
-          aria-pressed={!isCreatingAccount}
+          onClick={() => setActiveTab("login")}
+          aria-pressed={activeTab === "login"}
           className={`min-h-10 flex-1 rounded-lg px-3 text-sm font-semibold transition ${
-            !isCreatingAccount ? "bg-[#2F4858] text-[#DDFBEF] shadow-sm" : "text-[#2F4858]/70 hover:text-[#2F4858]"
+            activeTab === "login"
+              ? "bg-[#2F4858] text-[#DDFBEF] shadow-sm dark:bg-[#ddfbef] dark:text-[#2f4858]"
+              : "text-[#2F4858]/70 hover:text-[#2F4858] dark:text-[#e5f0ea]/70 dark:hover:text-[#e5f0ea]"
           }`}
         >
-          Log in
+          Log in with Roll
         </button>
         <button
           type="button"
-          onClick={() => {
-            setIsCreatingAccount(true);
-            setError("");
-            setNeedsSmtpSetup(false);
-            setPendingVerification(null);
-          }}
-          aria-pressed={isCreatingAccount}
+          onClick={() => setActiveTab("signup")}
+          aria-pressed={activeTab === "signup"}
           className={`min-h-10 flex-1 rounded-lg px-3 text-sm font-semibold transition ${
-            isCreatingAccount ? "bg-[#2F4858] text-[#DDFBEF] shadow-sm" : "text-[#2F4858]/70 hover:text-[#2F4858]"
+            activeTab === "signup"
+              ? "bg-[#2F4858] text-[#DDFBEF] shadow-sm dark:bg-[#ddfbef] dark:text-[#2f4858]"
+              : "text-[#2F4858]/70 hover:text-[#2F4858] dark:text-[#e5f0ea]/70 dark:hover:text-[#e5f0ea]"
           }`}
         >
-          Create your account
+          Register with Password
         </button>
       </div>
 
-      {isCreatingAccount ? (
-        <div className="rounded-2xl border border-[#2F4858]/10 bg-white p-5 sm:p-6">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#DDFBEF] text-[#2F4858]">
-              <Mail aria-hidden="true" size={19} />
-            </div>
-            <div>
-              <h2 className="font-semibold text-[#2F4858]">Create your student account</h2>
-              <p className="mt-1 text-sm leading-6 text-[#2F4858]/70">
-                Enter your roll and email. We’ll verify your email, then you’ll choose a password for future roll-number sign-ins.
-              </p>
-            </div>
-          </div>
-
-          {error && (
-            <div role="alert" className="mt-4 rounded-lg border border-[#E2B7A9] bg-[#FFF3EF] px-3 py-2 text-sm leading-5 text-[#733F36]">
-              <p>{error}</p>
-              {needsSmtpSetup && (
-                <a
-                  href="https://supabase.com/docs/guides/auth/auth-smtp"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-block font-semibold underline underline-offset-2"
-                >
-                  Supabase SMTP setup guide
-                </a>
-              )}
-            </div>
-          )}
-          {!pendingVerification ? (
-            <form onSubmit={requestAccountCode} className="mt-5 space-y-4">
-              <div>
-                <label htmlFor="student-roll" className="portal-label !text-[#2F4858]">Roll number</label>
-                <input
-                  id="student-roll"
-                  name="roll"
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{7}"
-                  maxLength={7}
-                  required
-                  placeholder="Enter your 7-digit roll number"
-                  className="portal-field"
-                />
-              </div>
-              <div>
-                <label htmlFor="student-email" className="portal-label !text-[#2F4858]">Email address</label>
-                <input
-                  id="student-email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  maxLength={254}
-                  placeholder="Enter your email address"
-                  className="portal-field"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={sending}
-                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2F4858] px-5 text-sm font-semibold text-[#DDFBEF] shadow-sm transition hover:-translate-y-0.5 hover:bg-[#243B49] disabled:cursor-wait disabled:opacity-70"
-              >
-                {sending ? <LoaderCircle aria-hidden="true" className="animate-spin" size={17} /> : <Send aria-hidden="true" size={16} />}
-                {sending ? "Sending confirmation code…" : "Email me a confirmation code"}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={verifyAccountCode} className="mt-5 space-y-4">
-              <p role="status" className="rounded-lg border border-[#B8D9C5] bg-[#F0FBF4] px-3 py-2 text-sm leading-5 text-[#2F5E48]">
-                We sent a confirmation code to {pendingVerification.email}. Enter it here to verify your email. Use the newest code; requesting another will invalidate the previous one.
-              </p>
-              {error && <p role="alert" className="rounded-lg border border-[#E2B7A9] bg-[#FFF3EF] px-3 py-2 text-sm leading-5 text-[#733F36]">{error}</p>}
-              <div>
-                <label htmlFor="student-email-code" className="portal-label !text-[#2F4858]">Email confirmation code</label>
-                <input
-                  id="student-email-code"
-                  name="token"
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{6,8}"
-                  maxLength={8}
-                  autoComplete="one-time-code"
-                  required
-                  placeholder="Enter the code from your email"
-                  className="portal-field"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={sending}
-                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2F4858] px-5 text-sm font-semibold text-[#DDFBEF] shadow-sm transition hover:-translate-y-0.5 hover:bg-[#243B49] disabled:cursor-wait disabled:opacity-70"
-              >
-                {sending ? <LoaderCircle aria-hidden="true" className="animate-spin" size={17} /> : <KeyRound aria-hidden="true" size={16} />}
-                {sending ? "Verifying email…" : "Verify email"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingVerification(null);
-                  setError("");
-                }}
-                className="min-h-10 w-full rounded-lg text-sm font-semibold text-[#2F4858]/70 underline underline-offset-2 hover:text-[#2F4858]"
-              >
-                Use a different email or request a new code
-              </button>
-            </form>
-          )}
-          <p className="mt-5 border-t border-[#2F4858]/[0.08] pt-4 text-xs leading-5 text-[#2F4858]/60">
-            Your email is verified with a one-time code. You set your own password on this site; we never email passwords.
-          </p>
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-[#2F4858]/10 bg-white p-5 sm:p-6">
+      {/* Tab: Log In with Roll & Password */}
+      {activeTab === "login" ? (
+        <div className="rounded-2xl border border-[#2F4858]/10 bg-white p-5 sm:p-6 dark:bg-[#1b2d36] dark:border-white/10">
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#DDFBEF] text-[#2F4858]">
               <KeyRound aria-hidden="true" size={19} />
             </div>
             <div>
-              <h2 className="font-semibold text-[#2F4858]">Welcome back</h2>
-              <p className="mt-1 text-sm leading-6 text-[#2F4858]/70">Log in with your roll number and password.</p>
+              <h3 className="font-semibold text-[#2F4858] dark:text-[#e5f0ea]">Welcome back</h3>
+              <p className="mt-1 text-sm leading-6 text-[#2F4858]/70 dark:text-[#e5f0ea]/70">
+                Log in with your seven-digit roll number and portal password.
+              </p>
             </div>
           </div>
 
           <form action={requestStudentLogin} className="mt-5 space-y-4">
             <div>
-              <label htmlFor="login-roll" className="portal-label !text-[#2F4858]">Roll number</label>
+              <label htmlFor="login-roll" className="portal-label !text-[#2F4858] dark:!text-[#e5f0ea]">Roll number</label>
               <input
                 id="login-roll"
                 name="roll"
@@ -279,13 +89,14 @@ export default function StudentEmailAccess() {
                 pattern="[0-9]{7}"
                 maxLength={7}
                 required
+                defaultValue={initialRoll}
                 autoComplete="username"
-                placeholder="Enter your 7-digit roll number"
+                placeholder="e.g. 2503042"
                 className="portal-field"
               />
             </div>
             <div>
-              <label htmlFor="login-password" className="portal-label !text-[#2F4858]">Password</label>
+              <label htmlFor="login-password" className="portal-label !text-[#2F4858] dark:!text-[#e5f0ea]">Password</label>
               <input
                 id="login-password"
                 name="password"
@@ -299,14 +110,92 @@ export default function StudentEmailAccess() {
             </div>
             <SubmitButton
               pendingText="Signing in…"
-              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2F4858] px-5 text-sm font-semibold text-[#DDFBEF] shadow-sm transition hover:-translate-y-0.5 hover:bg-[#243B49] disabled:cursor-wait disabled:opacity-70"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2F4858] px-5 text-sm font-semibold text-[#DDFBEF] shadow-sm transition hover:-translate-y-0.5 hover:bg-[#243B49] disabled:cursor-wait disabled:opacity-70 dark:bg-[#ddfbef] dark:text-[#2f4858] dark:hover:bg-white"
             >
               <KeyRound aria-hidden="true" size={16} /> Log in
             </SubmitButton>
           </form>
-          <p className="mt-5 border-t border-[#2F4858]/[0.08] pt-4 text-xs leading-5 text-[#2F4858]/60">
-            New here? Choose <span className="font-semibold text-[#2F4858]">Create your account</span> above. Your email is only used to verify that you control it.
-          </p>
+        </div>
+      ) : (
+        /* Tab: Register with Email & Password */
+        <div className="rounded-2xl border border-[#2F4858]/10 bg-white p-5 sm:p-6 dark:bg-[#1b2d36] dark:border-white/10">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#DDFBEF] text-[#2F4858]">
+              <UserPlus aria-hidden="true" size={19} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-[#2F4858] dark:text-[#e5f0ea]">Create student account</h3>
+              <p className="mt-1 text-sm leading-6 text-[#2F4858]/70 dark:text-[#e5f0ea]/70">
+                Register your roll number with your email and a password.
+              </p>
+            </div>
+          </div>
+
+          <form action={completeStudentAccount} className="mt-5 space-y-4">
+            <div>
+              <label htmlFor="reg-roll" className="portal-label !text-[#2F4858] dark:!text-[#e5f0ea]">Roll number</label>
+              <input
+                id="reg-roll"
+                name="roll"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{7}"
+                maxLength={7}
+                required
+                defaultValue={initialRoll}
+                placeholder="e.g. 2503042"
+                className="portal-field"
+              />
+            </div>
+            <div>
+              <label htmlFor="reg-email" className="portal-label !text-[#2F4858] dark:!text-[#e5f0ea]">Email address</label>
+              <input
+                id="reg-email"
+                name="email"
+                type="email"
+                required
+                maxLength={254}
+                autoComplete="email"
+                placeholder="your.email@example.com"
+                className="portal-field"
+              />
+            </div>
+            <div>
+              <label htmlFor="reg-password" className="portal-label !text-[#2F4858] dark:!text-[#e5f0ea]">Password</label>
+              <input
+                id="reg-password"
+                name="password"
+                type="password"
+                minLength={8}
+                maxLength={72}
+                required
+                autoComplete="new-password"
+                placeholder="At least 8 characters"
+                className="portal-field"
+              />
+            </div>
+            <div>
+              <label htmlFor="reg-confirm-password" className="portal-label !text-[#2F4858] dark:!text-[#e5f0ea]">Confirm password</label>
+              <input
+                id="reg-confirm-password"
+                name="confirm_password"
+                type="password"
+                minLength={8}
+                maxLength={72}
+                required
+                autoComplete="new-password"
+                placeholder="Re-enter your password"
+                className="portal-field"
+              />
+            </div>
+
+            <SubmitButton
+              pendingText="Creating account…"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2F4858] px-5 text-sm font-semibold text-[#DDFBEF] shadow-sm transition hover:-translate-y-0.5 hover:bg-[#243B49] disabled:cursor-wait disabled:opacity-70 dark:bg-[#ddfbef] dark:text-[#2f4858] dark:hover:bg-white"
+            >
+              <Lock aria-hidden="true" size={16} /> Create account
+            </SubmitButton>
+          </form>
         </div>
       )}
     </div>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import Navbar from "../../../components/ui/Navbar";
 import SubmitButton from "../../../components/SubmitButton";
 import ToastAlert from "../../../components/ToastAlert";
+import GoogleSignInButton from "../../../components/GoogleSignInButton";
 import { loginAdmin } from "../actions";
 
 export const metadata: Metadata = {
@@ -59,49 +60,63 @@ export default async function AdminLogin({
               <ArrowLeft aria-hidden="true" size={16} /> Back to portal
             </Link>
           </div>
-          <div className="rounded-[1.75rem] border border-[#2F4858]/10 bg-[#F8FCF9] p-6 shadow-[0_24px_65px_rgba(47,72,88,0.12)] sm:p-9">
+          <div className="rounded-[1.75rem] border border-[#2F4858]/10 bg-[#F8FCF9] p-6 shadow-[0_24px_65px_rgba(47,72,88,0.12)] sm:p-9 dark:bg-[#1b2d36] dark:border-white/10">
             <div className="mb-8">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#DDFBEF] text-[#2F4858]">
                 <LockKeyhole aria-hidden="true" size={20} />
               </div>
-              <h2 className="mt-5 text-2xl font-semibold tracking-[-0.04em] text-[#2F4858]">Admin sign in</h2>
-              <p className="mt-2 text-sm leading-6 text-[#2F4858]/65">Use your authorized portal administrator account.</p>
+              <h2 className="mt-5 text-2xl font-semibold tracking-[-0.04em] text-[#2F4858] dark:text-[#e5f0ea]">Admin sign in</h2>
+              <p className="mt-2 text-sm leading-6 text-[#2F4858]/65 dark:text-[#e5f0ea]/70">Use your authorized portal administrator account.</p>
             </div>
 
-            <form action={loginAdmin} className="space-y-5">
-              <div>
-                <label htmlFor="admin-email" className="mb-2 block text-sm font-medium text-[#2F4858]">Email address</label>
-                <input
-                  id="admin-email"
-                  name="email"
-                  type="email"
-                  required
-                  autoComplete="username"
-                  placeholder="you@example.com"
-                  className="portal-field"
-                />
-              </div>
-              <div>
-                <label htmlFor="admin-password" className="mb-2 block text-sm font-medium text-[#2F4858]">Password</label>
-                <input
-                  id="admin-password"
-                  name="password"
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  placeholder="Enter your password"
-                  className="portal-field"
-                />
-              </div>
-              <SubmitButton
-                pendingText="Signing in…"
-                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2F4858] px-5 text-sm font-semibold text-[#DDFBEF] shadow-md shadow-[#2F4858]/15 transition hover:-translate-y-0.5 hover:bg-[#243B49] disabled:cursor-wait disabled:opacity-75"
-              >
-                Sign in securely
-              </SubmitButton>
-            </form>
+            <div className="space-y-5">
+              <GoogleSignInButton
+                label="Continue with Google"
+                redirectTo="/admin/dashboard"
+              />
 
-            <p className="mt-6 border-t border-[#2F4858]/[0.08] pt-5 text-center text-xs leading-5 text-[#2F4858]/55">
+              <div className="relative flex items-center justify-center">
+                <div className="w-full border-t border-[#2F4858]/15 dark:border-white/15" />
+                <span className="absolute bg-[#F8FCF9] px-3 text-xs uppercase tracking-wider text-[#2F4858]/55 dark:bg-[#1b2d36] dark:text-[#e5f0ea]/55">
+                  or with email & password
+                </span>
+              </div>
+
+              <form action={loginAdmin} className="space-y-4">
+                <div>
+                  <label htmlFor="admin-email" className="mb-2 block text-sm font-medium text-[#2F4858] dark:text-[#e5f0ea]">Email address</label>
+                  <input
+                    id="admin-email"
+                    name="email"
+                    type="email"
+                    required
+                    autoComplete="username"
+                    placeholder="you@example.com"
+                    className="portal-field"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="admin-password" className="mb-2 block text-sm font-medium text-[#2F4858] dark:text-[#e5f0ea]">Password</label>
+                  <input
+                    id="admin-password"
+                    name="password"
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    placeholder="Enter your password"
+                    className="portal-field"
+                  />
+                </div>
+                <SubmitButton
+                  pendingText="Signing in…"
+                  className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2F4858] px-5 text-sm font-semibold text-[#DDFBEF] shadow-md shadow-[#2F4858]/15 transition hover:-translate-y-0.5 hover:bg-[#243B49] disabled:cursor-wait disabled:opacity-75 dark:bg-[#ddfbef] dark:text-[#2f4858] dark:hover:bg-white"
+                >
+                  Sign in securely
+                </SubmitButton>
+              </form>
+            </div>
+
+            <p className="mt-6 border-t border-[#2F4858]/[0.08] pt-5 text-center text-xs leading-5 text-[#2F4858]/55 dark:border-white/10 dark:text-[#e5f0ea]/55">
               Access is limited to administrators approved for the RUET CSE ’25 portal.
             </p>
           </div>

@@ -1,0 +1,25 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Student avatars
+    match /avatars/{userId}/{fileName} {
+      // Avatars are publicly viewable by visitors
+      allow read: if true;
+
+      // Only the authenticated student can upload to their own avatar directory
+      // Max 15MB, valid image content type only
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && request.resource.size <= 15 * 1024 * 1024
+                   && request.resource.contentType.matches('image/(jpeg|png|webp|gif)');
+
+      // Allow users to delete their own uploaded avatar
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Default deny for all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
